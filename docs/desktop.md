@@ -54,6 +54,13 @@ capacity is kept separate from per-device activity.
 - If an attached service disappears, it switches to an embedded collector
   and says so.
 
+## Large text (checked 2026-10-06)
+Rendered with `gtk-xft-dpi` at 1.5× (144 DPI): all text, cards and tables
+scale and nothing overlaps; chart axis labels scale with DPI (10 px at
+96 DPI). Known limitation: fixed column widths make the window's minimum
+width grow to ~1480 px at 1.5× text, wider than small laptop screens.
+Screen-reader (Orca) testing has not been done.
+
 ## Measured (reference machine, release, broadway, 30 s, embedded collector)
 | visible page | CPU % of one core | RSS |
 | --- | --- | --- |

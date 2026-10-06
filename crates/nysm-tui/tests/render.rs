@@ -209,7 +209,11 @@ fn timeline_cursor_shows_alert_event_at_that_moment() {
         metric: AlertMetric::MemoryPressurePct,
         target: None,
         timestamp_ms: p.timestamp_ms,
-        kind: AlertEventKind::Fired { value: 20.0, threshold: 10.0, sustained_s: 30.0 },
+        kind: AlertEventKind::Fired {
+            value: 20.0,
+            threshold: 10.0,
+            sustained_s: 30.0,
+        },
     }];
     // Live view mentions the most recent event.
     assert!(render(&mut app, 100, 30).contains("last alert event"));

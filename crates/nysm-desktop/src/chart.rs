@@ -129,17 +129,20 @@ fn draw(cr: &gtk::cairo::Context, w: f64, h: f64, d: &Data, widget: &gtk::Drawin
         // (in binary units for byte rates: 1 MiB/s, not 977 KiB/s).
         nice_binary(m.max(1.0))
     });
-    cr.set_font_size(10.0);
+    // Follow the user's text size (large-text settings) instead of a fixed
+    // pixel size: ~85 % of the widget font, as GTK's caption style does.
+    let fpx = label_px();
+    cr.set_font_size(fpx);
     let (left, bottom) = if d.axes {
         let widest = [max, max / 2.0, 0.0]
             .iter()
             .map(|v| cr.text_extents(&fmt(*v)).map(|e| e.width()).unwrap_or(30.0))
             .fold(0.0, f64::max);
-        (widest + 8.0, 16.0)
+        (widest + 8.0, fpx + 6.0)
     } else {
         (0.0, 0.0)
     };
-    let top = if d.axes { 6.0 } else { 2.0 };
+    let top = if d.axes { fpx * 0.6 } else { 2.0 };
     let pw = (w - left).max(1.0);
     let ph = (h - top - bottom).max(1.0);
     let y_of = |v: f64| top + ph * (1.0 - (v / max).clamp(0.0, 1.0));
@@ -249,6 +252,16 @@ fn nice_binary(v: f64) -> f64 {
     let r = nice_ceiling(v / unit);
     // 1000 of a unit reads better as 1 of the next unit.
     if r >= 1000.0 { 1024.0 * unit } else { r * unit }
+}
+
+/// Axis label size in pixels: 10 px at the default 96 DPI, scaled by the
+/// display DPI (gtk-xft-dpi), so large-text settings scale chart labels.
+fn label_px() -> f64 {
+    let dpi = gtk::Settings::default()
+        .map(|s| s.gtk_xft_dpi())
+        .filter(|d| *d > 0)
+        .map_or(96.0, |d| d as f64 / 1024.0);
+    (10.0 * dpi / 96.0).clamp(8.0, 30.0)
 }
 
 /// 1, 2, 5 × 10^k at or above `v`.
