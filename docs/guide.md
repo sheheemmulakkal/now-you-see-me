@@ -150,7 +150,8 @@ for several) and press **Watch**: each gets a tile with live CPU and memory
 charts, kept even when it drops out of the top of the list or exits (up to 8).
 In the TUI, select a process and press `*`. Selecting a single process also
 shows its details, refreshed every second: state, parent, CPU, memory, threads,
-disk, open files against the limit, swap, and where it belongs.
+disk, open file descriptors (files, sockets, pipes) against the process's
+limit (`ulimit -n`), swap, and where it belongs.
 
 ### …find who is using a port?
 ```sh

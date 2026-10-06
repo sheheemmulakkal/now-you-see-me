@@ -982,7 +982,7 @@ impl Pages {
         let failed = match &r {
             Ok(d) => {
                 rows.push((
-                    "Open files",
+                    "Open file descriptors (files, sockets, pipes)",
                     match (&d.open_fds, &d.fd_limit) {
                         (Ok(n), Ok(u64::MAX)) => format!("{n} (no limit)"),
                         (Ok(n), Ok(l)) => format!("{n} of {l} allowed"),

@@ -158,14 +158,25 @@ const FIG: char = '\u{2007}';
 /// U+2008 PUNCTUATION SPACE: as wide as a period.
 const PUNCT: char = '\u{2008}';
 
-/// Filler that brings a number ("9.5", "10", "999", "5") up to the width
-/// of three digits and a period. Figure and punctuation spaces are by
-/// definition as wide as a digit and a period, and UI fonts have tabular
-/// digits, so every number then has the same pixel width.
-fn number_fill(num: &str) -> String {
+/// Filler that brings a number up to the widest form it can take:
+/// `max_digits` digits (a "9.9"-style value is narrower: a period is
+/// narrower than a digit). Figure and punctuation spaces are by definition
+/// as wide as a digit and a period, and UI fonts have tabular digits, so
+/// every number then has the same pixel width.
+fn number_fill(num: &str, max_digits: usize) -> String {
     let digits = num.chars().filter(char::is_ascii_digit).count();
-    let mut f: String = std::iter::repeat_n(FIG, 3usize.saturating_sub(digits)).collect();
-    if !num.contains('.') {
+    let dot = num.contains('.');
+    // Widths in periods: digit = 2, period = 1.
+    // The widest form is `max_digits` digits or "9.9" (two digits and a
+    // period), whichever is wider.
+    let want = (max_digits * 2).max(5);
+    let mut need = want.saturating_sub(digits * 2 + dot as usize);
+    let mut f = String::new();
+    while need >= 2 {
+        f.push(FIG);
+        need -= 2;
+    }
+    if need == 1 {
         f.push(PUNCT);
     }
     f
@@ -185,12 +196,16 @@ fn unit_fill(unit: &str) -> String {
 /// this kind is equally wide. The filler is placed at the end of the item
 /// so values stay next to their icons.
 fn fixed(v: f64, base: f64, units: &[&str]) -> (String, String) {
+    fixed_digits(v, base, units, 3)
+}
+
+fn fixed_digits(v: f64, base: f64, units: &[&str], max_digits: usize) -> (String, String) {
     let text = compact(v, base, units);
     let unit_len = text
         .trim_start_matches(|c: char| c.is_ascii_digit() || c == '.')
         .len();
     let (num, unit) = text.split_at(text.len() - unit_len);
-    let fill = number_fill(num) + &unit_fill(unit);
+    let fill = number_fill(num, max_digits) + &unit_fill(unit);
     (text, fill)
 }
 
@@ -213,8 +228,23 @@ fn compact(v: f64, base: f64, units: &[&str]) -> String {
     }
 }
 
-fn fixed_bytes(n: f64) -> (String, String) {
-    fixed(n, 1024.0, &["B", "K", "M", "G", "T"])
+/// Memory used, always in GiB ("0.5G", "9.7G", "15G"), filled only up to
+/// the widest value possible on this machine (e.g. "15G" with 15.6 GiB)
+/// rather than "999G". Machines with 1000 GiB or more use T/G as needed.
+fn fixed_bytes(n: f64, total: f64) -> (String, String) {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    let (v, max) = (n / GIB, total / GIB);
+    if max >= 999.5 {
+        return fixed(n, 1024.0, &["B", "K", "M", "G", "T"]);
+    }
+    let num = if v < 9.95 {
+        format!("{v:.1}")
+    } else {
+        format!("{v:.0}")
+    };
+    let max_digits = format!("{max:.0}").len().max(2);
+    let fill = number_fill(&num, max_digits);
+    (format!("{num}G"), fill)
 }
 
 fn fixed_rate(bytes_per_s: f64, unit: RateUnit) -> (String, String) {
@@ -309,11 +339,9 @@ impl NysmTray {
             .usage
             .live()
             .map_or_else(dash, |c| fixed_pct(c.total_pct));
-        let mem = s
-            .memory
-            .usage
-            .live()
-            .map_or_else(dash, |m| fixed_bytes(m.used_bytes as f64));
+        let mem = s.memory.usage.live().map_or_else(dash, |m| {
+            fixed_bytes(m.used_bytes as f64, m.total_bytes as f64)
+        });
         let (rx, tx) = match s.network.total.live() {
             Some(n) => (
                 fixed_rate(n.rx_bytes_per_s, self.rate),
@@ -860,26 +888,30 @@ mod tests {
 
     #[test]
     fn values_have_constant_pixel_width() {
-        // Count digit-wide and period-wide slots of value + filler; the
-        // unit letter itself is M-wide (K/B/k/b carry a period filler).
-        let slots = |(t, f): (String, String)| {
-            let all = t + &f;
-            let digit = all
+        // Width in periods (digit = 2, period = 1) of value + filler.
+        let width = |(t, f): (String, String)| -> usize {
+            (t + &f)
                 .chars()
-                .filter(|c| c.is_ascii_digit() || *c == FIG)
-                .count();
-            let period = all.chars().filter(|c| *c == '.' || *c == PUNCT).count();
-            (digit, period)
+                .map(|c| match c {
+                    '0'..='9' | FIG => 2,
+                    '.' | PUNCT => 1,
+                    _ => 0,
+                })
+                .sum()
         };
+        // Rates: three digits; K/B carry one extra period to match M.
         for v in [0.0, 5.0, 64.0, 999.0, 1536.0, 9.0e4, 1.2e6, 5.0e8] {
             let (t, f) = fixed_rate(v, RateUnit::Bytes);
-            let narrow_unit = !t.ends_with('M');
-            assert_eq!(slots((t, f)), (3, 1 + narrow_unit as usize), "{v}");
+            let narrow = !t.ends_with('M') as usize;
+            assert_eq!(width((t, f)), 6 + narrow, "{v}");
+        }
+        // Memory on a 15.6 GiB machine: as wide as "9.9".
+        let gib = 1024.0 * 1024.0 * 1024.0;
+        for g in [0.5, 9.7, 10.0, 15.0] {
+            assert_eq!(width(fixed_bytes(g * gib, 15.6 * gib)), 5, "{g}");
         }
         assert_eq!(fixed_rate(1536.0, RateUnit::Bytes).0, "1.5K");
         assert_eq!(fixed_rate(64.0 * 1024.0, RateUnit::Bytes).0, "64K");
-        assert_eq!(fixed_bytes(9.6 * 1024.0 * 1024.0 * 1024.0).0, "9.6G");
-        assert_eq!(slots(fixed_pct(5.0)), (3, 0));
-        assert_eq!(slots(fixed_pct(100.0)), (3, 0));
+        assert_eq!(width(fixed_pct(5.0)), width(fixed_pct(100.0)));
     }
 }
