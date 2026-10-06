@@ -379,13 +379,15 @@ impl Platform for LinuxPlatform {
     }
 
     fn own_limits(&mut self) -> CResult<nysm_core::snapshot::OwnLimits> {
-        // In the root cgroup (a host) these files do not exist.
+        // Inside a container /sys/fs/cgroup is the container's own cgroup
+        // and has these files; on a host it is the hierarchy root, which
+        // has no limits of its own.
         const ROOT: &str = "/sys/fs/cgroup";
         if !Path::new(&format!("{ROOT}/memory.max")).exists()
             && !Path::new(&format!("{ROOT}/cpu.max")).exists()
         {
             return Err(CollectError::Unsupported(
-                "running in the root cgroup (no container limits apply)".into(),
+                "not running in a container (no container limits apply)".into(),
             ));
         }
         let read = |f: &str| fs::read_to_string(format!("{ROOT}/{f}")).ok();

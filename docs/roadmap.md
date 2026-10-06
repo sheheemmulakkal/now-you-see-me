@@ -50,7 +50,8 @@ Legend: ✅ done and verified · 🟡 partial · ⬜ not started
 - ✅ Release binaries are static musl (portable across distributions)
 - ✅ Container verification (Debian 12, Alpine), own cgroup limits, container network fallback
 - ✅ Split .deb packages (nysm / nysm-tray / nysm-desktop), install/purge tested in Debian 12 container
-- ⬜ aarch64 builds, signed releases, apt repository; licence decision (owner)
+- ✅ Licence: MIT OR Apache-2.0 (ADR 0008)
+- ⬜ aarch64 builds, signed releases, apt repository
 
 - ✅ Network diagnostics (`net check`) and storage scan (`disk usage`), on demand (docs/diagnostics.md)
 - ✅ Filesystem growth trend and time-to-full projection (TUI Disk TREND column, desktop volumes, JSON)

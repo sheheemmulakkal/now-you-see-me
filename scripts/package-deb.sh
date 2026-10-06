@@ -29,13 +29,17 @@ mkpkg() { # name description depends files...
   cat > "$d/usr/share/doc/$name/copyright" <<COPY
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: Now You See Me
-Comment: The project licence has not been chosen yet (see
- docs/adr/0008-distribution.md). Do not redistribute this package until it is.
- Third-party components and their licences are listed in
+Comment: Third-party components and their licences are listed in
  /usr/share/doc/$name/THIRD-PARTY-LICENSES.txt
+
+Files: *
+Copyright: 2026 Muhammed Sheheem and the Now You See Me contributors
+License: MIT or Apache-2.0
+ Full texts: /usr/share/doc/$name/LICENSE-MIT and
+ /usr/share/doc/$name/LICENSE-APACHE
 COPY
   chmod 0644 "$d/usr/share/doc/$name/copyright"
-  install -m 0644 "$stage/THIRD-PARTY-LICENSES.txt" "$d/usr/share/doc/$name/"
+  install -m 0644 "$stage/THIRD-PARTY-LICENSES.txt" "$stage/LICENSE-MIT" "$stage/LICENSE-APACHE" "$d/usr/share/doc/$name/"
   size=$(du -sk "$d" | cut -f1)
   {
     echo "Package: $name"

@@ -32,7 +32,7 @@ if [ -f "$here/bin/nysm-desktop" ]; then
   put "$here/share/applications/dev.nysm.NowYouSeeMe.desktop" "$prefix/share/applications/dev.nysm.NowYouSeeMe.desktop" 0644
 fi
 put "$here/share/applications/nysm-tray.desktop" "$prefix/share/applications/nysm-tray.desktop" 0644
-for d in README.md THIRD-PARTY-LICENSES.txt; do
+for d in README.md LICENSE-MIT LICENSE-APACHE THIRD-PARTY-LICENSES.txt; do
   put "$here/$d" "$prefix/share/doc/nysm/$d" 0644
 done
 put "$here/uninstall.sh" "$prefix/share/nysm/uninstall.sh" 0755

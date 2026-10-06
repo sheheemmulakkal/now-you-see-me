@@ -22,7 +22,7 @@ else
   echo "note: nysm-desktop not built (GTK development files missing?)" >&2
 fi
 cp packaging/linux/*.desktop "$stage/share/applications/"
-cp packaging/linux/install.sh packaging/linux/uninstall.sh README.md "$stage/"
+cp packaging/linux/install.sh packaging/linux/uninstall.sh README.md LICENSE-MIT LICENSE-APACHE "$stage/"
 python3 scripts/third_party_licenses.py > "$stage/THIRD-PARTY-LICENSES.txt"
 (cd target/dist && tar --owner=0 --group=0 --sort=name -czf "$name.tar.gz" "$name" && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
 echo "built target/dist/$name.tar.gz"

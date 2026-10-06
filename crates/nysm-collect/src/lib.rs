@@ -65,7 +65,7 @@ pub trait Platform: Send {
     fn interfaces(&mut self) -> CResult<Vec<RawInterface>>;
     fn disks(&mut self) -> CResult<Vec<RawDisk>>;
     fn processes(&mut self) -> CResult<ProcessScan>;
-    /// Limits of our own cgroup (containers); unsupported in the root cgroup.
+    /// Limits of our own cgroup (containers); unsupported on a host.
     fn own_limits(&mut self) -> CResult<nysm_core::snapshot::OwnLimits>;
     /// Per-container / service / app accounting (cgroup v2). On demand.
     fn cgroups(&mut self) -> CResult<CgroupScan>;

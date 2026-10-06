@@ -19,7 +19,7 @@ while stack:
         if any(k.get("kind") is None for k in d["dep_kinds"]):
             stack.append(d["pkg"])
 print("Third-party components in Now You See Me binaries\n")
-print("Project licence: not yet chosen by the owner (see docs/adr/0008-distribution.md).\n")
+print("Now You See Me is licensed under MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE).\n")
 for i in sorted(seen - ws, key=lambda i: pkgs[i]["name"]):
     p = pkgs[i]
     print(f'{p["name"]} {p["version"]}: {p.get("license") or p.get("license_file") or "UNKNOWN"}')

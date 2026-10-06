@@ -16,6 +16,8 @@ Read this first when resuming. Newest entry on top.
 - Desktop keyboard shortcuts (Alt+1…7 like the TUI, Ctrl+F, Ctrl+W/Q, type-to-filter).
 - `nysm config set` and a desktop Settings dialog (format-preserving via
   toml_edit; refuses invalid input and never overwrites an invalid file).
+- Licence chosen by the owner: MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE,
+  shipped in tarball and .deb). CI deferred; next is a local soak of the release build.
 - SSH remote testing on real hardware paused (no second machine).
 
 ## 2026-10-06 — paused by the user (resume here)

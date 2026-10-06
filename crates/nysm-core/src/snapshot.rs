@@ -31,7 +31,7 @@ pub struct Snapshot {
     pub memory: MemorySnapshot,
     pub network: NetworkSnapshot,
     pub storage: StorageSnapshot,
-    /// Own cgroup limits; `unsupported` on a host (root cgroup).
+    /// Own cgroup limits; `unsupported` outside a container.
     #[serde(default = "limits_default")]
     pub limits: Reading<OwnLimits>,
     /// Temperatures, fans, batteries (refreshed on a slower schedule).

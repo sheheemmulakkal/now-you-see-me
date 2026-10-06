@@ -121,5 +121,14 @@ On an Intel Core i5-7500 (4 cores) Ubuntu 24.04 desktop with ~510 processes, rel
 
 ## Licence
 
-Not yet chosen; this is an owner decision recorded in
-[ADR 0008](docs/adr/0008-distribution.md). Do not redistribute until it is set.
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT licence ([LICENSE-MIT](LICENSE-MIT))
+
+at your option. Unless you explicitly state otherwise, any contribution you
+intentionally submit for inclusion in this work, as defined in the Apache-2.0
+licence, is dual licensed as above, without any additional terms or conditions.
+
+Third-party components are listed with their licences by
+`scripts/third_party_licenses.py` (shipped as `THIRD-PARTY-LICENSES.txt`).

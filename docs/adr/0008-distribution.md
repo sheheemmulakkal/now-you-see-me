@@ -1,6 +1,6 @@
 # ADR 0008: Distribution strategy and licence
 
-Status: proposed
+Status: accepted (licence chosen 2026-10-06)
 
 ## Decision
 - Ship separable artifacts: `nysm` (CLI+TUI, no GUI deps), later
@@ -11,9 +11,11 @@ Status: proposed
   visibility (sandboxing hides host processes) — not by default.
 - No autostart by default; install/uninstall instructions are tested.
 
-## Owner decision required
-**Project licence is not chosen.** `license` is deliberately unset in
-`Cargo.toml`. Choose one before any public distribution.
+## Licence
+**MIT OR Apache-2.0** (owner decision, 2026-10-06), the Rust ecosystem
+convention and the same terms as most dependencies. `LICENSE-MIT` and
+`LICENSE-APACHE` are at the repository root and are shipped in the tarball
+and in each `.deb` (`/usr/share/doc/<package>/`).
 
 Dependency licences as of 2026-10-06 (`cargo tree -e normal --prefix none
 --format "{p} {l}"`): predominantly MIT and/or Apache-2.0, plus two Zlib
