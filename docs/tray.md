@@ -31,6 +31,13 @@ cp packaging/linux/nysm-tray.desktop ~/.config/autostart/
   the end of the item, so values stay next to their icons. Measured on Ubuntu
   24.04: icon positions moved 0 px over 30 s. A `⚠` appears before the first value while an
   alert fires. The icons are symbolic, so the panel recolours them.
+- **Names**: on by default, short names before values — `CPU 24%`,
+  `RAM 9.9G`, `Disk 87%` (storage used on `/`), `I/O 2%` (disk activity);
+  network keeps its arrows and read/write its R/W. Menu → *Show names* (or
+  desktop Settings) turns them off; saved as `display.tray_names`. Ubuntu shows
+  no tray tooltips, so each item's menu starts with a heading saying what it
+  shows. GNOME gives the right side of the bar about half the screen; with many
+  items it shortens the longest labels with "…" — show fewer items or no names.
 - **Choose what to show**: menu → *Show in top bar* → CPU usage, Memory used,
   Network download / upload, Storage used (%), Disk activity (%), Disk read / write. At least
   one item always stays (the last one is greyed out). Applied at once and saved as `display.tray_items` (e.g. `"cpu,mem,net,disk"`);

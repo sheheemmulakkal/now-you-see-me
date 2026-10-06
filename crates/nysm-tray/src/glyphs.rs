@@ -14,8 +14,8 @@ pub const STORAGE: &str = "nysm-storage-symbolic";
 const SVG: [(&str, &str); 5] = [
     (
         STORAGE,
-        // Capacity: an outlined bar, partly filled.
-        r##"<path fill-rule="evenodd" d="M2.5 4h11A1.5 1.5 0 0 1 15 5.5v5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 10.5v-5A1.5 1.5 0 0 1 2.5 4zm0 1.25a.25.25 0 0 0-.25.25v5c0 .14.11.25.25.25h11a.25.25 0 0 0 .25-.25v-5a.25.25 0 0 0-.25-.25z"/><path d="M3.5 6.5h6v3h-6z"/>"##,
+        // Disk usage: a pie with the used slice filled.
+        r##"<path fill-rule="evenodd" d="M8 1a7 7 0 1 1 0 14A7 7 0 0 1 8 1zm0 1.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/><path d="M8 3.5V8l3.9 2.25A4.5 4.5 0 0 0 8 3.5z" transform="rotate(180 8 8)"/><path d="M8 3.5A4.5 4.5 0 0 0 4.1 10.25L8 8z"/>"##,
     ),
     (
         CPU,

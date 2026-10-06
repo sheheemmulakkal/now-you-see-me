@@ -119,6 +119,8 @@ pub struct Display {
     /// cpu, mem, net, storage (root filesystem used %), disk (activity %),
     /// diskio (read/write).
     pub tray_items: String,
+    /// Tray: short names before values ("CPU 24%", "RAM 6.2G", "Disk 87%").
+    pub tray_names: bool,
 }
 
 impl Default for Display {
@@ -129,6 +131,7 @@ impl Default for Display {
             theme: Theme::default(),
             container_names: false,
             tray_items: "cpu,mem,net,storage,disk".into(),
+            tray_names: true,
         }
     }
 }
@@ -177,6 +180,7 @@ pub struct Settings {
     pub theme: Theme,
     pub container_names: bool,
     pub tray_items: String,
+    pub tray_names: bool,
     pub rules: Vec<Rule>,
     pub incidents: IncidentSettings,
 }
@@ -320,6 +324,7 @@ impl Config {
             theme: self.display.theme,
             container_names: self.display.container_names,
             tray_items: self.display.tray_items.clone(),
+            tray_names: self.display.tray_names,
             rules,
             incidents: IncidentSettings {
                 enabled: self.incidents.enabled,

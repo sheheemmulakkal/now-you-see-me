@@ -87,6 +87,17 @@ impl Item {
         }
     }
 
+    /// Short name shown before the value when names are on.
+    fn short_name(self) -> Option<&'static str> {
+        match self {
+            Item::Cpu => Some("CPU"),
+            Item::Memory => Some("RAM"),
+            Item::Storage => Some("Disk"),
+            Item::Disk => Some("I/O"),
+            Item::Meter | Item::Network | Item::DiskIo => None,
+        }
+    }
+
     fn parse_list(list: &str) -> Option<Vec<Item>> {
         let v: Option<Vec<Item>> = list
             .split(',')
@@ -144,6 +155,9 @@ struct NysmTray {
     rate: RateUnit,
     /// Show the text label next to the icon (Ayatana hosts, e.g. Ubuntu).
     show_label: bool,
+    /// Short names before values; shared by all items, set from the menu
+    /// or the config file.
+    show_names: Arc<AtomicBool>,
     quit: Arc<AtomicBool>,
     /// Set when the tray host comes back (e.g. after a screen lock), so the
     /// main loop can re-register all items in a stable order.
@@ -293,6 +307,23 @@ fn psi(r: &Reading<Pressure>) -> String {
 }
 
 impl NysmTray {
+    /// Names on/off (menu): applies to all items on their next update and
+    /// is saved as `display.tray_names`.
+    fn toggle_names(&self) {
+        let on = !self.show_names.load(Ordering::Relaxed);
+        self.show_names.store(on, Ordering::Relaxed);
+        if let Some(p) = nysm_config::default_path()
+            && let Err(e) = nysm_config::set_many(
+                &p,
+                &[("display.tray_names", if on { "true" } else { "false" })],
+            )
+        {
+            eprintln!("nysm-tray: choice not saved: {e}");
+        }
+        // Re-create items so every label updates at once.
+        self.reselect.store(true, Ordering::SeqCst);
+    }
+
     /// Show or hide an item (menu). The last item cannot be removed. The
     /// choice is saved as `display.tray_items` and applied by the main loop.
     fn toggle(&self, item: Item) {
@@ -337,7 +368,34 @@ impl NysmTray {
             "⚠ "
         };
         let text = self.value_text(s);
-        format!("{alert}{text}")
+        let name = self
+            .item
+            .short_name()
+            .filter(|_| self.show_names.load(Ordering::Relaxed))
+            .map_or(String::new(), |n| format!("{n} "));
+        format!("{alert}{name}{text}")
+    }
+
+    /// What this item shows, for the top of its menu.
+    fn heading(&self) -> String {
+        let s = self.snap.as_deref();
+        match self.item {
+            Item::Meter => nysm_core::brand::PRODUCT_NAME.into(),
+            Item::Cpu => "CPU: usage of all cores".into(),
+            Item::Memory => "RAM: memory in use".into(),
+            Item::Network => "Network: ↓ download  ↑ upload, per second".into(),
+            Item::Storage => match s.and_then(root_fs) {
+                Some(f) => format!(
+                    "Disk: storage used on / — {} of {}, {} free",
+                    units::bytes(f.used_bytes as f64),
+                    units::bytes(f.total_bytes as f64),
+                    units::bytes(f.available_bytes as f64)
+                ),
+                None => "Disk: storage used on /".into(),
+            },
+            Item::Disk => "I/O: disk activity (time the busiest disk was busy)".into(),
+            Item::DiskIo => "Disk read (R) and write (W), per second".into(),
+        }
     }
 
     /// The item that carries the alert marker (leftmost).
@@ -580,7 +638,9 @@ impl ksni::Tray for NysmTray {
             }
             .into()
         };
-        let mut items: Vec<MenuItem<Self>> = self.lines().into_iter().map(info).collect();
+        // Ubuntu shows no tooltips, so the menu says which item this is.
+        let mut items: Vec<MenuItem<Self>> = vec![info(self.heading()), MenuItem::Separator];
+        items.extend(self.lines().into_iter().map(info));
         if !self.firing.is_empty() {
             items.push(MenuItem::Separator);
             for f in &self.firing {
@@ -612,6 +672,15 @@ impl ksni::Tray for NysmTray {
                         .into()
                     })
                     .collect(),
+                ..Default::default()
+            }
+            .into(),
+        );
+        items.push(
+            CheckmarkItem {
+                label: "Show names (CPU, RAM, Disk, I/O)".into(),
+                checked: self.show_names.load(Ordering::Relaxed),
+                activate: Box::new(|t: &mut Self| t.toggle_names()),
                 ..Default::default()
             }
             .into(),
@@ -766,6 +835,7 @@ fn main() {
     let quit = Arc::new(AtomicBool::new(false));
     let host_back = Arc::new(AtomicBool::new(false));
     let reselect = Arc::new(AtomicBool::new(false));
+    let show_names = Arc::new(AtomicBool::new(settings.tray_names));
     let selection = Arc::new(std::sync::Mutex::new(items.clone()));
     let spawn_all = |source_text: &str| -> Vec<ksni::blocking::Handle<NysmTray>> {
         let mut handles = Vec::new();
@@ -782,6 +852,7 @@ fn main() {
                 source: source_text.to_string(),
                 rate: settings.rate_unit,
                 show_label,
+                show_names: show_names.clone(),
                 quit: quit.clone(),
                 host_back: host_back.clone(),
                 selection: selection.clone(),
@@ -832,6 +903,9 @@ fn main() {
             if m != config_mtime {
                 config_mtime = m;
                 let (cfg, _) = nysm_config::load_or_default(path.as_deref());
+                if show_names.swap(cfg.tray_names, Ordering::SeqCst) != cfg.tray_names {
+                    reselect.store(true, Ordering::SeqCst);
+                }
                 if let Some(want) = Item::parse_list(&cfg.tray_items)
                     && let Ok(mut sel) = selection.lock()
                     && *sel != want
