@@ -30,6 +30,7 @@ cpu_frequency = true
 rate_unit = "bytes"         # or "bits"
 ascii = false               # TUI: ASCII-only charts/borders
 theme = "system"            # desktop app: system | light | dark
+container_names = false     # desktop app: ask Docker/Podman for container names (opt-in)
 
 [incidents]                 # opt-in, see docs/incidents.md
 enabled = false
@@ -58,7 +59,7 @@ button, Ctrl+,) change only the named keys and keep the file's comments and
 layout. The result is validated before an atomic write, so an invalid value is
 rejected with the file left unchanged. An existing file that is already invalid
 is never overwritten; fix it first. The desktop theme selector also saves
-`display.theme`.
+`display.theme`, and the "Container names" switch saves `display.container_names`.
 
 ## Validation and recovery
 - Unknown keys are errors (typos are not silently ignored).

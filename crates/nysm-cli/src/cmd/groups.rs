@@ -60,13 +60,7 @@ fn of_limit(v: Option<u64>, max: Option<u64>) -> String {
 }
 
 /// Full container id from a cgroup path like `…/docker-<id>.scope`.
-fn container_id(path: &str) -> Option<&str> {
-    let leaf = path.rsplit('/').next()?;
-    let leaf = leaf.strip_suffix(".scope")?;
-    ["docker-", "libpod-", "cri-containerd-", "crio-"]
-        .iter()
-        .find_map(|p| leaf.strip_prefix(p))
-}
+use nysm_collect::runtime::container_id;
 
 pub fn run(
     ctx: &Ctx,

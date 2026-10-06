@@ -44,7 +44,7 @@ undone, `app-` prefix and instance numbers stripped; snaps → `code
 The main process is the first PID in the group.
 
 ## Limitations
-- Container names (`infra-nginx-1`) are shown only with `--names`
+- Container names (`infra-nginx-1`) are shown only with `--names` (desktop app: the "Container names" switch, saved as `display.container_names`)
   (`nysm containers --names`, `nysm groups --names`): one read-only
   `GET /containers/json` to the Docker socket (`/var/run/docker.sock`) or
   rootless Podman (`$XDG_RUNTIME_DIR/podman/podman.sock`), 3 s timeout,

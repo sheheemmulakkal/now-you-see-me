@@ -112,6 +112,9 @@ pub struct Display {
     pub ascii: bool,
     /// Desktop app theme.
     pub theme: Theme,
+    /// Desktop app: resolve container names through the Docker/Podman API
+    /// socket (opt-in; that socket grants broad privileges).
+    pub container_names: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -156,6 +159,7 @@ pub struct Settings {
     pub rate_unit: nysm_core::units::RateUnit,
     pub ascii: bool,
     pub theme: Theme,
+    pub container_names: bool,
     pub rules: Vec<Rule>,
     pub incidents: IncidentSettings,
 }
@@ -297,6 +301,7 @@ impl Config {
             },
             ascii: self.display.ascii,
             theme: self.display.theme,
+            container_names: self.display.container_names,
             rules,
             incidents: IncidentSettings {
                 enabled: self.incidents.enabled,

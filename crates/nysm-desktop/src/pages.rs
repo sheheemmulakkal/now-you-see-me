@@ -272,12 +272,13 @@ pub struct Pages {
     // Containers & services
     groups_kind: gtk::DropDown,
     groups_sort: gtk::DropDown,
+    names: ContainerNames,
     groups_count: gtk::Label,
     groups_list: gtk::ListBox,
 }
 
 impl Pages {
-    pub fn new(stack: &gtk::Stack, rate: RateUnit, source: String) -> Self {
+    pub fn new(stack: &gtk::Stack, rate: RateUnit, source: String, container_names: bool) -> Self {
         let net_fmt: fn(f64) -> String = if rate == RateUnit::Bits {
             bits_rate
         } else {
@@ -549,11 +550,22 @@ impl Pages {
         gbar.append(&groups_kind);
         gbar.append(&groups_sort);
         gbar.append(&groups_count);
+        let names_switch = gtk::Switch::new();
+        names_switch.set_active(container_names);
+        names_switch.set_valign(gtk::Align::Center);
+        let names_l = label("Container names", &[]);
+        names_l.set_wrap(false);
+        let tip = "Ask Docker/Podman for container names (one read-only request every 30 s while this page is open). \
+                   Off by default: access to that socket is equivalent to root on most systems.";
+        names_switch.set_tooltip_text(Some(tip));
+        names_l.set_tooltip_text(Some(tip));
+        gbar.append(&names_l);
+        gbar.append(&names_switch);
         gp.append(&gbar);
         let (gcard, _) = card("");
         gcard.append(&label(
             "From cgroup v2 accounting, read as a normal user. Memory includes page cache charged to the group. \
-             Container names need the runtime and are shown as runtime + id.",
+             Without \"Container names\" containers are shown as runtime + id.",
             &["dim-label"],
         ));
         let groups_list = gtk::ListBox::new();
@@ -614,6 +626,7 @@ impl Pages {
             fs_list,
             groups_kind,
             groups_sort,
+            names: ContainerNames::new(names_switch),
             groups_count,
             groups_list,
         };
@@ -1192,10 +1205,12 @@ impl Pages {
             _ => ProcessSort::Cpu,
         };
         query::sort_groups(&mut rows, key);
+        let names = self.names.poll();
         self.groups_count.set_text(&format!(
-            "{} groups · CPU % of all {} cores",
+            "{} groups · CPU % of all {} cores{}",
             rows.len(),
-            t.logical_cores
+            t.logical_cores,
+            self.names.note()
         ));
         set_row(
             &self.groups_list,
@@ -1233,7 +1248,15 @@ impl Pages {
                 k + 1,
                 &[
                     (g.kind.label().into(), 9, 0.0),
-                    (safe(&g.name), 0, 0.0),
+                    (
+                        safe(
+                            nysm_collect::runtime::container_id(&g.path)
+                                .and_then(|id| names.get(id))
+                                .map_or(g.name.as_str(), |c| c.name.as_str()),
+                        ),
+                        0,
+                        0.0,
+                    ),
                     (
                         g.cpu_pct.live().map_or("—".into(), |c| format!("{c:.1}")),
                         6,
@@ -1468,4 +1491,82 @@ fn render_processes(
     }
     table.set_rows(rows);
     ids
+}
+
+type NameMap = std::collections::HashMap<String, nysm_collect::runtime::ContainerInfo>;
+
+/// Opt-in container names from the runtime API, fetched off the UI thread
+/// at most every 30 s while the groups page is shown.
+struct ContainerNames {
+    switch: gtk::Switch,
+    map: RefCell<Rc<NameMap>>,
+    error: RefCell<Option<String>>,
+    result: Arc<std::sync::Mutex<Option<nysm_collect::CResult<NameMap>>>>,
+    in_flight: std::cell::Cell<bool>,
+    fetched: std::cell::Cell<Option<std::time::Instant>>,
+}
+
+impl ContainerNames {
+    fn new(switch: gtk::Switch) -> Self {
+        let n = ContainerNames {
+            switch: switch.clone(),
+            map: RefCell::new(Rc::new(NameMap::new())),
+            error: RefCell::new(None),
+            result: Arc::default(),
+            in_flight: std::cell::Cell::new(false),
+            fetched: std::cell::Cell::new(None),
+        };
+        switch.connect_active_notify(|sw| {
+            let v = if sw.is_active() { "true" } else { "false" };
+            if let Some(p) = nysm_config::default_path()
+                && let Err(e) = nysm_config::set_many(&p, &[("display.container_names", v)])
+            {
+                eprintln!("nysm-desktop: setting not saved: {e}");
+            }
+        });
+        n
+    }
+
+    /// Current names (empty when off); starts a refresh when due.
+    fn poll(&self) -> Rc<NameMap> {
+        if !self.switch.is_active() {
+            self.fetched.set(None);
+            *self.map.borrow_mut() = Rc::new(NameMap::new());
+            *self.error.borrow_mut() = None;
+            return self.map.borrow().clone();
+        }
+        if let Some(r) = self.result.lock().ok().and_then(|mut g| g.take()) {
+            self.in_flight.set(false);
+            match r {
+                Ok(m) => {
+                    *self.map.borrow_mut() = Rc::new(m);
+                    *self.error.borrow_mut() = None;
+                }
+                Err(e) => *self.error.borrow_mut() = Some(e.reason()),
+            }
+        }
+        let due = self
+            .fetched
+            .get()
+            .is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(30));
+        if due && !self.in_flight.get() {
+            self.in_flight.set(true);
+            self.fetched.set(Some(std::time::Instant::now()));
+            let slot = self.result.clone();
+            std::thread::spawn(move || {
+                let r = nysm_collect::runtime::container_names(std::time::Duration::from_secs(3));
+                if let Ok(mut g) = slot.lock() {
+                    *g = Some(r);
+                }
+            });
+        }
+        self.map.borrow().clone()
+    }
+
+    fn note(&self) -> String {
+        match &*self.error.borrow() {
+            Some(e) if self.switch.is_active() => format!(" · names unavailable: {e}"),
+            _ => String::new(),
+        }
+    }
 }

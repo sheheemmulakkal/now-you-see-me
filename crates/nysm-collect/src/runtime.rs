@@ -22,6 +22,16 @@ pub struct ContainerInfo {
 
 const MAX_RESPONSE: u64 = 8 * 1024 * 1024;
 
+/// Container id from a cgroup path such as
+/// `/system.slice/docker-<id>.scope`, for looking up runtime names.
+pub fn container_id(cgroup_path: &str) -> Option<&str> {
+    let leaf = cgroup_path.rsplit('/').next()?;
+    let leaf = leaf.strip_suffix(".scope")?;
+    ["docker-", "libpod-", "cri-containerd-", "crio-"]
+        .iter()
+        .find_map(|p| leaf.strip_prefix(p))
+}
+
 /// Parse a `/containers/json` body into id → info (ids are full 64-hex).
 pub fn parse_containers(body: &str) -> CResult<HashMap<String, ContainerInfo>> {
     let v: serde_json::Value = serde_json::from_str(body)

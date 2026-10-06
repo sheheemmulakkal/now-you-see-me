@@ -434,7 +434,12 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
     let stack = gtk::Stack::new();
     stack.set_transition_type(gtk::StackTransitionType::None); // no motion
     stack.set_hexpand(true);
-    let ui = pages::Pages::new(&stack, settings.rate_unit, source_label(&source));
+    let ui = pages::Pages::new(
+        &stack,
+        settings.rate_unit,
+        source_label(&source),
+        settings.container_names,
+    );
     let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     body.append(&sidebar(&stack));
     body.append(&stack);

@@ -163,7 +163,9 @@ nysm services                   # CPU/memory/IO per service with unit state
 nysm services --failed          # failed systemd units
 ```
 The TUI (`7`, then `k` to cycle kinds) and the desktop app ("Containers &
-services") show the same live, with memory against each limit.
+services") show the same live, with memory against each limit. In the desktop
+app, the **Container names** switch shows real names (`infra-api-1`) instead of
+`docker <id>`; it is off by default because the Docker socket is root-equivalent.
 
 ### …know whether my disk is filling up, and with what?
 - The Disk view (TUI `6`, desktop "Storage") shows each filesystem with a
