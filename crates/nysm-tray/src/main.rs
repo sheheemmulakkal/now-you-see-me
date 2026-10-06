@@ -90,6 +90,9 @@ struct NysmTray {
     /// Show the text label next to the icon (Ayatana hosts, e.g. Ubuntu).
     show_label: bool,
     quit: Arc<AtomicBool>,
+    /// Set when the tray host comes back (e.g. after a screen lock), so the
+    /// main loop can re-register all items in a stable order.
+    host_back: Arc<AtomicBool>,
 }
 
 /// Compact size for the top bar: "6.2G", "512M".
@@ -323,6 +326,10 @@ impl ksni::Tray for NysmTray {
         }
     }
 
+    fn watcher_online(&self) {
+        self.host_back.store(true, Ordering::SeqCst);
+    }
+
     fn activate(&mut self, _x: i32, _y: i32) {
         open_monitor();
     }
@@ -402,6 +409,12 @@ fn describe(source: &Source) -> String {
     }
 }
 
+fn update_all(handles: &[ksni::blocking::Handle<NysmTray>], f: &dyn Fn(&mut NysmTray)) {
+    for h in handles {
+        h.update(|t| f(t));
+    }
+}
+
 fn main() {
     const USAGE: &str = "usage: nysm-tray [--attach auto|never|require] [--items cpu,mem,net,disk] [--meter] [--no-label]";
     let mut attach = Attach::Auto;
@@ -477,42 +490,48 @@ fn main() {
         }
     };
     let quit = Arc::new(AtomicBool::new(false));
-    let mut handles = Vec::new();
-    for item in &items {
-        let tray = NysmTray {
-            item: *item,
-            icon_dir: icon_dir.clone(),
-            snap: None,
-            firing: Vec::new(),
-            stale: false,
-            source: describe(&source),
-            rate: settings.rate_unit,
-            show_label,
-            quit: quit.clone(),
-        };
-        // Wait for a tray host instead of failing: at login the tray can
-        // start before the panel, and GNOME removes the host while the
-        // screen is locked. Items re-register when it comes back.
-        match tray.assume_sni_available(true).spawn() {
-            Ok(h) => handles.push(h),
-            Err(e) => {
-                eprintln!(
-                    "nysm-tray: cannot start the tray service ({e}).\n\
-                 GNOME needs AppIndicator support (Ubuntu has it built in; elsewhere install the\n\
-                 'AppIndicator and KStatusNotifierItem Support' extension), or use the optional\n\
-                 GNOME Shell extension, `nysm tui`, or `nysm-desktop`."
-                );
-                std::process::exit(1);
+    let host_back = Arc::new(AtomicBool::new(false));
+    let spawn_all = |source_text: &str| -> Vec<ksni::blocking::Handle<NysmTray>> {
+        let mut handles = Vec::new();
+        // Ubuntu's host inserts each new item to the left of the previous
+        // one, so register right-to-left to read cpu, mem, net, disk.
+        for item in items.iter().rev() {
+            let tray = NysmTray {
+                item: *item,
+                icon_dir: icon_dir.clone(),
+                snap: None,
+                firing: Vec::new(),
+                stale: false,
+                source: source_text.to_string(),
+                rate: settings.rate_unit,
+                show_label,
+                quit: quit.clone(),
+                host_back: host_back.clone(),
+            };
+            // Wait for a tray host instead of failing: at login the tray can
+            // start before the panel, and GNOME removes the host while the
+            // screen is locked.
+            match tray.assume_sni_available(true).spawn() {
+                Ok(h) => handles.push(h),
+                Err(e) => {
+                    eprintln!(
+                        "nysm-tray: cannot start the tray service ({e}).\n\
+                         GNOME needs AppIndicator support (Ubuntu has it built in; elsewhere install the\n\
+                         'AppIndicator and KStatusNotifierItem Support' extension), or use the optional\n\
+                         GNOME Shell extension, `nysm tui`, or `nysm-desktop`."
+                    );
+                    std::process::exit(1);
+                }
             }
+            // Let the host add this item before the next one.
+            std::thread::sleep(Duration::from_millis(200));
         }
-        // Hosts list items in registration order; give each a moment.
-        std::thread::sleep(Duration::from_millis(150));
-    }
-    let update_all = |f: &dyn Fn(&mut NysmTray)| {
-        for h in &handles {
-            h.update(|t| f(t));
-        }
+        handles
     };
+    let mut source_text = describe(&source);
+    let mut handles = spawn_all(&source_text);
+    let mut last_snap: Option<Arc<Snapshot>> = None;
+    let mut last_firing: Vec<String> = Vec::new();
 
     let mut last_seq = 0;
     let mut last_at = Instant::now();
@@ -520,11 +539,28 @@ fn main() {
     let mut last_attach_try = Instant::now();
     while !quit.load(Ordering::SeqCst) && !handles.iter().any(|h| h.is_closed()) {
         std::thread::sleep(Duration::from_millis(500));
+        if host_back.swap(false, Ordering::SeqCst) {
+            // Items re-registered all at once in arbitrary order; redo it
+            // one by one so the order is stable.
+            std::thread::sleep(Duration::from_secs(1));
+            host_back.store(false, Ordering::SeqCst);
+            for h in std::mem::take(&mut handles) {
+                h.shutdown().wait();
+            }
+            handles = spawn_all(&source_text);
+            let (snap, firing, src) = (last_snap.clone(), last_firing.clone(), source_text.clone());
+            update_all(&handles, &|t| {
+                t.snap = snap.clone();
+                t.firing = firing.clone();
+                t.source = src.clone();
+            });
+        }
         if !source.is_connected() {
             source = Source::local(engine_config(&settings), settings.rules.clone());
             last_seq = 0;
-            let d = describe(&source);
-            update_all(&|t| t.source = format!("{d} — service disconnected"));
+            source_text = format!("{} — service disconnected", describe(&source));
+            let d = source_text.clone();
+            update_all(&handles, &|t| t.source = d.clone());
         }
         // While collecting locally, periodically try to (re)attach to a
         // service so a long-running tray does not duplicate sampling.
@@ -542,8 +578,9 @@ fn main() {
             ) {
                 source = s;
                 last_seq = 0;
-                let d = describe(&source);
-                update_all(&|t| t.source = d.clone());
+                source_text = describe(&source);
+                let d = source_text.clone();
+                update_all(&handles, &|t| t.source = d.clone());
             }
         }
         let stale = last_at.elapsed() > settings.interval * 3 + Duration::from_secs(1);
@@ -568,13 +605,15 @@ fn main() {
         if let Some(s) = fresh {
             last_seq = s.seq;
             last_at = Instant::now();
-            update_all(&|t| {
+            last_snap = Some(s.clone());
+            last_firing = firing.clone();
+            update_all(&handles, &|t| {
                 t.snap = Some(s.clone());
                 t.stale = false;
                 t.firing = firing.clone();
             });
         } else {
-            update_all(&|t| t.stale = stale);
+            update_all(&handles, &|t| t.stale = stale);
         }
     }
     for h in handles {
