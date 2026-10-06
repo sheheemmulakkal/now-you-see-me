@@ -169,11 +169,24 @@ pub fn run(
             exit::OK
         });
     }
+    let display_name = |g: &CgroupSnapshot| -> String {
+        fmt::safe(&match (runtime_name(g), container_id(&g.path)) {
+            (Some(i), Some(id)) => nysm_collect::runtime::label(&i.name, id),
+            _ => g.name.clone(),
+        })
+    };
+    // Name column: as wide as the longest name, within 28..=48.
+    let nw = rows
+        .iter()
+        .map(|g| display_name(g).chars().count())
+        .max()
+        .unwrap_or(0)
+        .clamp(28, 48);
     writeln!(
         out,
         "{}",
         st.bold(&format!(
-            "{:<9} {:<28} {:>7} {:>8} {:>21} {:>6} {:>10} {:>10} {:>7}  {}",
+            "{:<9} {:<nw$} {:>7} {:>8} {:>21} {:>6} {:>10} {:>10} {:>7}  {}",
             "KIND",
             "NAME",
             "CPU%",
@@ -207,12 +220,9 @@ pub fn run(
         let mem = if near_limit { st.warn(&mem) } else { mem };
         writeln!(
             out,
-            "{:<9} {:<28} {:>7} {:>8} {} {:>6} {:>10} {:>10} {:>7}  {}",
+            "{:<9} {:<nw$} {:>7} {:>8} {} {:>6} {:>10} {:>10} {:>7}  {}",
             g.kind.label(),
-            fmt::truncate(
-                &fmt::safe(runtime_name(g).map_or(g.name.as_str(), |i| i.name.as_str())),
-                28
-            ),
+            fmt::truncate(&display_name(g), nw),
             cpu,
             lim,
             mem,

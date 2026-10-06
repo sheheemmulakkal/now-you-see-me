@@ -22,6 +22,12 @@ pub struct ContainerInfo {
 
 const MAX_RESPONSE: u64 = 8 * 1024 * 1024;
 
+/// "infra-api-1 (1ffec9e0869c)": the runtime's name with the short id.
+pub fn label(name: &str, id: &str) -> String {
+    let short: String = id.chars().take(12).collect();
+    format!("{name} ({short})")
+}
+
 /// Container id from a cgroup path such as
 /// `/system.slice/docker-<id>.scope`, for looking up runtime names.
 pub fn container_id(cgroup_path: &str) -> Option<&str> {

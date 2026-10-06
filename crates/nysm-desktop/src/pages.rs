@@ -1249,11 +1249,12 @@ impl Pages {
                 &[
                     (g.kind.label().into(), 9, 0.0),
                     (
-                        safe(
-                            nysm_collect::runtime::container_id(&g.path)
-                                .and_then(|id| names.get(id))
-                                .map_or(g.name.as_str(), |c| c.name.as_str()),
-                        ),
+                        safe(&match nysm_collect::runtime::container_id(&g.path)
+                            .and_then(|id| names.get(id).map(|c| (id, c)))
+                        {
+                            Some((id, c)) => nysm_collect::runtime::label(&c.name, id),
+                            None => g.name.clone(),
+                        }),
                         0,
                         0.0,
                     ),
