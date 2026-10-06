@@ -1,0 +1,10 @@
+/* Stable widths with tabular figures so the panel does not jump. */
+.nysm-panel { spacing: 8px; }
+.nysm-value { font-feature-settings: "tnum"; min-width: 4.2em; text-align: right; }
+.nysm-net { min-width: 11.5em; }
+.nysm-stale { color: rgba(255, 255, 255, 0.45); font-style: italic; }
+.nysm-alerting .nysm-value { color: #ff7b63; }
+.nysm-row-name { min-width: 11em; }
+.nysm-row-value { font-feature-settings: "tnum"; padding-right: 8px; }
+.nysm-sparkline { margin-left: 4px; }
+.nysm-status { font-size: 0.9em; color: rgba(255, 255, 255, 0.7); }

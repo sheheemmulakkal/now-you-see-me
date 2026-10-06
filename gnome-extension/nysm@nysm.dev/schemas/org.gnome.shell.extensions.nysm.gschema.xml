@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.nysm" path="/org/gnome/shell/extensions/nysm/">
+    <key name="show-cpu" type="b"><default>true</default><summary>Show CPU usage in the panel</summary></key>
+    <key name="show-memory" type="b"><default>true</default><summary>Show memory usage in the panel</summary></key>
+    <key name="show-network" type="b"><default>true</default><summary>Show network receive/transmit in the panel</summary></key>
+    <key name="compact" type="b"><default>false</default><summary>Hide the metric names, show values only</summary></key>
+    <key name="rate-unit" type="s"><default>'bytes'</default><summary>Network rate unit: 'bytes' or 'bits'</summary></key>
+  </schema>
+</schemalist>

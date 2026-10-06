@@ -1,0 +1,9 @@
+{
+  "uuid": "nysm@nysm.dev",
+  "name": "Now You See Me",
+  "description": "Compact CPU, memory and network indicators from the Now You See Me collector service (nysm service run). Presentation only: all measurement happens in the collector.",
+  "shell-version": ["46"],
+  "settings-schema": "org.gnome.shell.extensions.nysm",
+  "url": "",
+  "version-name": "0.1.0"
+}

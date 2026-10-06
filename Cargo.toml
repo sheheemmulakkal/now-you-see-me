@@ -1,0 +1,43 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+# The GTK desktop app needs GTK development files; keep it out of default
+# builds so headless/server builds never require graphical libraries.
+default-members = [
+    "crates/nysm-core",
+    "crates/nysm-collect",
+    "crates/nysm-engine",
+    "crates/nysm-record",
+    "crates/nysm-config",
+    "crates/nysm-ipc",
+    "crates/nysm-tui",
+    "crates/nysm-cli",
+    "crates/nysm-tray",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+# License intentionally unset: an owner decision recorded in docs/adr/0008-distribution.md.
+publish = false
+
+[workspace.dependencies]
+nysm-core = { path = "crates/nysm-core" }
+nysm-collect = { path = "crates/nysm-collect" }
+nysm-engine = { path = "crates/nysm-engine" }
+nysm-tui = { path = "crates/nysm-tui" }
+nysm-record = { path = "crates/nysm-record" }
+nysm-config = { path = "crates/nysm-config" }
+nysm-ipc = { path = "crates/nysm-ipc" }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+libc = "0.2"
+clap = { version = "4.6", features = ["derive"] }
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "layout-cache"] }
+toml = "1.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

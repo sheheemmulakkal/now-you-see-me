@@ -1,0 +1,13 @@
+[package]
+name = "nysm-core"
+description = "Domain model, metric semantics and pure calculations for Now You See Me"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

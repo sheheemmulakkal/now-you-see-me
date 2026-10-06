@@ -1,0 +1,17 @@
+[package]
+name = "nysm-tui"
+description = "Terminal UI for Now You See Me"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+nysm-core.workspace = true
+nysm-collect.workspace = true
+nysm-engine.workspace = true
+nysm-ipc.workspace = true
+ratatui.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

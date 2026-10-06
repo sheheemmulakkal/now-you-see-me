@@ -1,0 +1,21 @@
+[package]
+name = "nysm-desktop"
+description = "Now You See Me: native GTK4 desktop app (Ubuntu/GNOME first)"
+version.workspace = true
+edition.workspace = true
+# gtk4 0.11 requires Rust 1.92.
+rust-version = "1.92"
+publish.workspace = true
+
+[[bin]]
+name = "nysm-desktop"
+path = "src/main.rs"
+
+[dependencies]
+nysm-core.workspace = true
+nysm-collect.workspace = true
+nysm-engine.workspace = true
+nysm-ipc.workspace = true
+nysm-config.workspace = true
+# GTK >= 4.12 (CssProvider::load_from_string). Ubuntu 24.04 ships 4.14.
+gtk = { package = "gtk4", version = "0.11", features = ["v4_12"] }

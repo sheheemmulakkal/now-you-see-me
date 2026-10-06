@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Now You See Me (tray)
+Comment=CPU and memory meter in the system tray
+Exec=nysm-tray
+Icon=utilities-system-monitor
+Terminal=false
+Categories=System;Monitor;
+NoDisplay=true
+# Opt-in autostart: copy to ~/.config/autostart/ to start at login.
+X-GNOME-Autostart-enabled=true

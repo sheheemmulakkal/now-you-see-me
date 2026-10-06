@@ -1,0 +1,11 @@
+[package]
+name = "nysm-engine"
+description = "Sampling engine: scheduling, counter deltas, bounded history and live subscriptions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+nysm-core.workspace = true
+nysm-collect.workspace = true
