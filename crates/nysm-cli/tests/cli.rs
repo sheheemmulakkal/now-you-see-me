@@ -389,3 +389,35 @@ fn inspect_shows_own_listening_socket_and_group() {
     }
     drop(l);
 }
+
+#[test]
+fn net_check_reports_connect_latency_and_failures() {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    let o = nysm(&[
+        "net",
+        "check",
+        &format!("127.0.0.1:{port}"),
+        "--count",
+        "2",
+        "--json",
+    ]);
+    assert_eq!(o.status.code(), Some(0));
+    let v = json(&o);
+    assert_eq!(v["failed"], 0);
+    assert!(v["avg_ms"].as_f64().unwrap() >= 0.0);
+    drop(l);
+    // Closed port: refused, exit 1.
+    let o = nysm(&[
+        "net",
+        "check",
+        &format!("127.0.0.1:{port}"),
+        "--count",
+        "1",
+        "--json",
+        "--timeout",
+        "1s",
+    ]);
+    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(json(&o)["failed"], 1);
+}

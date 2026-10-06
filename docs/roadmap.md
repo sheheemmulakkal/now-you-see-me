@@ -52,6 +52,8 @@ Legend: ✅ done and verified · 🟡 partial · ⬜ not started
 - ✅ Split .deb packages (nysm / nysm-tray / nysm-desktop), install/purge tested in Debian 12 container
 - ⬜ aarch64 builds, signed releases, apt repository; licence decision (owner)
 
+- ✅ Network diagnostics (`net check`) and storage scan (`disk usage`), on demand (docs/diagnostics.md)
+
 ## Milestone 5: broader graphical access
 - 🟡 GUI strategy for macOS/Windows proposed (ADR 0009: tray/menu-bar first, then evaluate Slint)
 - 🟡 Remote viewer threat model proposed (ADR 0010); ✅ step 1 implemented: `nysm tui --remote user@host` over SSH, no listener (docs/remote.md)

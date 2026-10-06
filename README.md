@@ -56,6 +56,8 @@ nysm record -o build.nysm -- cargo build    # exact CPU time + sampled tree
 nysm record -o idle.nysm --duration 60s     # whole-system window
 nysm compare before.nysm [after.nysm] [--json]
 nysm alerts [--list] [--format jsonl]       # sustained-threshold alert events
+nysm net check example.com      # DNS + TCP connect latency, on demand
+nysm disk usage ~/projects       # bounded, cancellable space scan
 nysm incidents [--delete-all]   # opt-in captures around alerts (see docs/incidents.md)
 nysm config path|show|init|check
 nysm service run|status|stop|unit   # optional shared collector; the TUI attaches automatically
@@ -113,7 +115,7 @@ On an Intel Core i5-7500 (4 cores) Ubuntu 24.04 desktop with ~510 processes, rel
 [metrics](docs/metrics.md) · [platform support](docs/platform-support.md) ·
 [security](docs/security.md) · [performance](docs/performance.md) ·
 [testing](docs/testing.md) · [recordings](docs/recordings.md) ·
-[alerts](docs/alerts.md) · [incidents](docs/incidents.md) · [remote over SSH](docs/remote.md) · [configuration](docs/configuration.md) ·
+[alerts](docs/alerts.md) · [incidents](docs/incidents.md) · [remote over SSH](docs/remote.md) · [diagnostics](docs/diagnostics.md) · [configuration](docs/configuration.md) ·
 [containers & services](docs/groups.md) · [tray](docs/tray.md) · [desktop](docs/desktop.md) · [GNOME extension (optional)](docs/gnome-extension.md) · [roadmap](docs/roadmap.md) ·
 [progress log](docs/progress.md) · [ADRs](docs/adr/)
 

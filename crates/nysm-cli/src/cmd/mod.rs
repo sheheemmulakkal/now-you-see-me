@@ -2,10 +2,13 @@ pub mod alerts;
 pub mod capabilities;
 pub mod compare;
 pub mod config;
+#[cfg(unix)]
+pub mod diskusage;
 pub mod doctor;
 pub mod groups;
 pub mod incidents;
 pub mod inspect;
+pub mod netcheck;
 pub mod ports;
 pub mod processes;
 pub mod record;

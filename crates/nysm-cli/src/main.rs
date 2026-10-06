@@ -34,6 +34,8 @@ Examples:
   nysm processes --sort mem --limit 15
   nysm inspect --pid 1234
   nysm ports --port 3000           who is listening on / connected to port 3000
+  nysm net check example.com       DNS time + TCP connect latency (on demand)
+  nysm disk usage ~/projects       largest entries (bounded scan, Ctrl-C safe)
   nysm containers                  CPU/memory/IO per container vs its limits
   nysm services --sort mem         systemd services by memory
   nysm record -o before.nysm -- cargo build --release
@@ -202,6 +204,17 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Storage analysis (on demand).
+    #[cfg(unix)]
+    Disk {
+        #[command(subcommand)]
+        action: DiskAction,
+    },
+    /// Active network diagnostics against an explicit endpoint (on demand).
+    Net {
+        #[command(subcommand)]
+        action: NetAction,
+    },
     /// Find sockets by port/protocol and the processes that own them.
     ///
     /// Lists listening sockets by default; `--port` matches local or remote
@@ -326,6 +339,50 @@ pub enum AttachArg {
     Auto,
     Never,
     Require,
+}
+
+#[cfg(unix)]
+#[derive(Subcommand)]
+pub enum DiskAction {
+    /// Largest entries directly under PATH (bounded, cancellable scan).
+    Usage {
+        path: std::path::PathBuf,
+        /// Number of entries to show.
+        #[arg(long, default_value_t = 20)]
+        top: usize,
+        /// Stop after visiting this many entries.
+        #[arg(long, default_value_t = 2_000_000)]
+        max_entries: u64,
+        #[arg(long, default_value = "60s", value_parser = duration_arg)]
+        timeout: Duration,
+        /// Also descend into other mounted filesystems.
+        #[arg(long)]
+        cross_filesystems: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum NetAction {
+    /// DNS lookup time and TCP connect latency to HOST[:PORT].
+    ///
+    /// Nothing runs in the background; only the given endpoint is
+    /// contacted. Exits 1 if it cannot be resolved or reached.
+    Check {
+        /// e.g. example.com, example.com:443, 10.0.0.5:22, [::1]:8080
+        target: String,
+        /// Port when TARGET has none.
+        #[arg(long, default_value_t = 443)]
+        port: u16,
+        /// Number of connection attempts.
+        #[arg(long, default_value_t = 4)]
+        count: u32,
+        #[arg(long, default_value = "3s", value_parser = duration_arg)]
+        timeout: Duration,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -525,6 +582,38 @@ fn main() -> ExitCode {
             cmd::alerts::run(&ctx, list, format, interval, count)
         }
         Command::Config { action } => cmd::config::run(&ctx, action, config_error),
+        #[cfg(unix)]
+        Command::Disk {
+            action:
+                DiskAction::Usage {
+                    path,
+                    top,
+                    max_entries,
+                    timeout,
+                    cross_filesystems,
+                    json,
+                },
+        } => cmd::diskusage::run(
+            &ctx,
+            &path,
+            top,
+            cmd::diskusage::Limits {
+                max_entries,
+                timeout,
+                one_file_system: !cross_filesystems,
+            },
+            json,
+        ),
+        Command::Net {
+            action:
+                NetAction::Check {
+                    target,
+                    port,
+                    count,
+                    timeout,
+                    json,
+                },
+        } => cmd::netcheck::run(&ctx, &target, port, count.clamp(1, 100), timeout, json),
         Command::Incidents { delete_all, json } => cmd::incidents::run(&ctx, delete_all, json),
         Command::Service { action } => cmd::service::run(&ctx, action),
         Command::Groups {

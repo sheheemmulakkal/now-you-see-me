@@ -37,6 +37,10 @@ clap = { version = "4.6", features = ["derive"] }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "layout-cache"] }
 toml = "1.1"
 
+# Line tables keep backtraces useful while cutting debug build size several-fold.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
