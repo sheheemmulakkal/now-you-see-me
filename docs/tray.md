@@ -30,6 +30,10 @@ cp packaging/linux/nysm-tray.desktop ~/.config/autostart/
   Network download / upload, Disk activity (%), Disk read / write. At least
   one item always stays (the last one is greyed out). Applied at once and saved as `display.tray_items` (e.g. `"cpu,mem,net,disk"`);
   `--items cpu,mem,net,disk,diskio` overrides it for one run.
+- **From the desktop app**: Settings (Ctrl+,) → *Top bar*: show or hide the
+  tray now, start it at login (writes or removes
+  `~/.config/autostart/nysm-tray.desktop`), and choose the items. A running
+  tray picks up item changes from the config file within 2 s.
 - **`--meter`**: a single item instead: a live two-bar icon (CPU blue,
   memory purple; grey when stale, red corner on alerts) followed by
   `24% · 6.2G · ↓1.8 MiB/s ↑240 KiB/s`.

@@ -1194,6 +1194,7 @@ name = "nysm-desktop"
 version = "0.1.0"
 dependencies = [
  "gtk4",
+ "libc",
  "nysm-collect",
  "nysm-config",
  "nysm-core",

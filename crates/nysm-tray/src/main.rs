@@ -159,11 +159,13 @@ fn disk_busy(s: &Snapshot) -> Option<f64> {
 /// constant width in the panel font.
 const FIG: char = '\u{2007}';
 
-/// Left-pad with figure spaces to `width` characters.
-fn pad(s: &str, width: usize) -> String {
-    let n = s.chars().count();
-    let mut out: String = std::iter::repeat_n(FIG, width.saturating_sub(n)).collect();
-    out.push_str(s);
+/// Right-pad with figure spaces to `width` characters.
+fn pad_right(s: &str, width: usize) -> String {
+    let mut out = s.to_string();
+    out.extend(std::iter::repeat_n(
+        FIG,
+        width.saturating_sub(s.chars().count()),
+    ));
     out
 }
 
@@ -443,7 +445,9 @@ impl ksni::Tray for NysmTray {
         } else {
             w
         };
-        pad(&text, w)
+        // Spare width goes after the text, so the value stays right next
+        // to its icon and only the gap to the next item varies.
+        pad_right(&text, w)
     }
 
     fn label_guide(&self) -> String {
@@ -711,8 +715,32 @@ fn main() {
     let mut last_at = Instant::now();
     let mut was_stale = false;
     let mut last_attach_try = Instant::now();
+    // Follow item choices made elsewhere (the desktop app's Settings).
+    let mtime = |p: &Option<std::path::PathBuf>| {
+        p.as_ref()
+            .and_then(|p| std::fs::metadata(p).ok())
+            .and_then(|m| m.modified().ok())
+    };
+    let mut config_mtime = mtime(&path);
+    let mut last_config_check = Instant::now();
     while !quit.load(Ordering::SeqCst) && !handles.iter().any(|h| h.is_closed()) {
         std::thread::sleep(Duration::from_millis(500));
+        if last_config_check.elapsed() >= Duration::from_secs(2) {
+            last_config_check = Instant::now();
+            let m = mtime(&path);
+            if m != config_mtime {
+                config_mtime = m;
+                let (cfg, _) = nysm_config::load_or_default(path.as_deref());
+                if let Some(want) = Item::parse_list(&cfg.tray_items)
+                    && let Ok(mut sel) = selection.lock()
+                    && *sel != want
+                    && !sel.contains(&Item::Meter)
+                {
+                    *sel = want;
+                    reselect.store(true, Ordering::SeqCst);
+                }
+            }
+        }
         let host_returned = host_back.swap(false, Ordering::SeqCst);
         if host_returned || reselect.swap(false, Ordering::SeqCst) {
             // After the host returns, items re-registered all at once in
@@ -819,6 +847,6 @@ mod tests {
         assert_eq!(short_rate(64.0 * 1024.0, RateUnit::Bytes), "64K");
         assert_eq!(short_rate(1000.0 * 1024.0, RateUnit::Bytes), "1.0M");
         assert_eq!(short_bytes(9.6 * 1024.0 * 1024.0 * 1024.0), "9.6G");
-        assert_eq!(pad("5", 3), "\u{2007}\u{2007}5");
+        assert_eq!(pad_right("5", 3), "5\u{2007}\u{2007}");
     }
 }

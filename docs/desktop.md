@@ -70,7 +70,7 @@ Screen-reader (Orca) testing has not been done.
 | typing on the Processes page | starts filtering |
 | click / arrow keys on a process | live details (refreshed every second) |
 | Ctrl/Shift-click, then **Watch** | watch up to 8 processes: CPU and memory charts since watching started |
-| Ctrl+, | Settings (network unit, sample interval, history; saved to the config file) |
+| Ctrl+, | Settings: network unit, sample interval, history (saved to the config file); top bar: show/hide the tray now, start it at login, choose its items (apply at once) |
 | Ctrl+W, Ctrl+Q | close the window |
 
 Checked by hand with real key presses through the broadway web client: Alt+2,

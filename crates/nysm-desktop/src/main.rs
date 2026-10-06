@@ -7,6 +7,7 @@ mod pages;
 mod proctable;
 mod settings;
 mod stats;
+mod trayctl;
 
 use std::cell::RefCell;
 use std::rc::Rc;

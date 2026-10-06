@@ -116,9 +116,12 @@ pub fn open(parent: &gtk::ApplicationWindow, current: &Settings, attached: bool)
         dropdowns.push(dd);
     }
     body.append(&grid);
+    body.append(&tray_section());
 
     let path = nysm_config::default_path();
-    let mut note = String::from("Changes apply the next time Now You See Me starts.");
+    let mut note = String::from(
+        "Sampling and units apply the next time Now You See Me starts; top-bar settings apply at once.",
+    );
     if attached {
         note.push_str(
             " Sampling comes from the collector service while attached; restart it \
@@ -207,4 +210,144 @@ pub fn save_theme(theme: nysm_config::Theme) {
     {
         eprintln!("nysm-desktop: theme not saved: {e}");
     }
+}
+
+/// Tray items offered here, in top-bar order: (config key, label).
+const TRAY_ITEMS: [(&str, &str); 5] = [
+    ("cpu", "CPU usage"),
+    ("mem", "Memory used"),
+    ("net", "Network"),
+    ("disk", "Disk activity %"),
+    ("diskio", "Disk read / write"),
+];
+
+/// "Top bar" controls: run the tray, start it at login, choose its items.
+/// All apply immediately.
+fn tray_section() -> gtk::Box {
+    let b = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    b.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    let title = small_label("Top bar (tray)");
+    title.add_css_class("card-title");
+    b.append(&title);
+    let status = small_label("");
+    status.add_css_class("dim-label");
+    status.set_wrap(true);
+    status.set_max_width_chars(52);
+
+    let row = |text: &str, tip: &str, on: bool| {
+        let r = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        let l = small_label(text);
+        l.set_hexpand(true);
+        l.set_tooltip_text(Some(tip));
+        let sw = gtk::Switch::new();
+        sw.set_active(on);
+        sw.set_valign(gtk::Align::Center);
+        sw.set_tooltip_text(Some(tip));
+        r.append(&l);
+        r.append(&sw);
+        (r, sw)
+    };
+    let (r1, show) = row(
+        "Show in top bar",
+        "Start or stop the tray indicator now",
+        !crate::trayctl::running().is_empty(),
+    );
+    let (r2, login) = row(
+        "Start at login",
+        "Add or remove ~/.config/autostart/nysm-tray.desktop",
+        crate::trayctl::autostart_enabled(),
+    );
+    b.append(&r1);
+    b.append(&r2);
+
+    let st = status.clone();
+    show.connect_active_notify(move |sw| {
+        if sw.is_active() {
+            match crate::trayctl::start() {
+                Ok(()) => st.set_text("Tray started."),
+                Err(e) => {
+                    st.set_text(&e);
+                    sw.set_active(false);
+                }
+            }
+        } else {
+            crate::trayctl::stop();
+            st.set_text("Tray stopped.");
+        }
+    });
+    let st = status.clone();
+    login.connect_active_notify(
+        move |sw| match crate::trayctl::set_autostart(sw.is_active()) {
+            Ok(()) => st.set_text(if sw.is_active() {
+                "The tray will start when you log in."
+            } else {
+                "The tray will no longer start at login."
+            }),
+            Err(e) => st.set_text(&format!("Not changed: {e}")),
+        },
+    );
+
+    // Items: read the saved choice now (it may have changed in the tray).
+    let path = nysm_config::default_path();
+    let (cur, _) = nysm_config::load_or_default(path.as_deref());
+    let chosen: Vec<String> = cur
+        .tray_items
+        .split(',')
+        .map(|x| x.trim().to_string())
+        .collect();
+    let items_l = small_label("Shown in the top bar");
+    items_l.add_css_class("dim-label");
+    b.append(&items_l);
+    let flow = gtk::FlowBox::new();
+    flow.set_selection_mode(gtk::SelectionMode::None);
+    flow.set_max_children_per_line(3);
+    flow.set_homogeneous(true);
+    let checks: Vec<gtk::CheckButton> = TRAY_ITEMS
+        .iter()
+        .map(|(key, label)| {
+            let c = gtk::CheckButton::with_label(label);
+            let on = chosen.iter().any(|x| {
+                x == key || (*key == "mem" && x == "memory") || (*key == "net" && x == "network")
+            });
+            c.set_active(on);
+            flow.insert(&c, -1);
+            c
+        })
+        .collect();
+    b.append(&flow);
+    let checks = std::rc::Rc::new(checks);
+    for c in checks.iter() {
+        let (all, st) = (checks.clone(), status.clone());
+        c.connect_toggled(move |c| {
+            let keys: Vec<&str> = TRAY_ITEMS
+                .iter()
+                .zip(all.iter())
+                .filter(|(_, c)| c.is_active())
+                .map(|((k, _), _)| *k)
+                .collect();
+            if keys.is_empty() {
+                // At least one item stays.
+                c.set_active(true);
+                st.set_text("At least one item is always shown.");
+                return;
+            }
+            match nysm_config::default_path()
+                .ok_or_else(|| "no configuration location".to_string())
+                .and_then(|p| {
+                    nysm_config::set_many(&p, &[("display.tray_items", &keys.join(","))])
+                        .map_err(|e| e.to_string())
+                }) {
+                Ok(_) => st.set_text("Saved; the running tray updates within a few seconds."),
+                Err(e) => st.set_text(&format!("Not saved: {e}")),
+            }
+        });
+    }
+    b.append(&status);
+    b
+}
+
+fn small_label(text: &str) -> gtk::Label {
+    let l = gtk::Label::new(Some(text));
+    l.set_xalign(0.0);
+    l
 }
