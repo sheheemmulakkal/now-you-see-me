@@ -420,6 +420,64 @@ const EXAMPLE_RULE: &str = r#"
 
 /// Atomically write `cfg` to `path` (temp file + rename), mode 0600.
 pub fn save(path: &Path, cfg: &Config) -> io::Result<()> {
+    let text = format!(
+        "# Now You See Me configuration. See docs/configuration.md.\n{}{EXAMPLE_RULE}",
+        cfg.to_toml()
+    );
+    write_atomic(path, text.as_bytes())
+}
+
+/// Set individual `table.key` values in the config file, keeping the
+/// file's comments and layout. Values that parse as TOML booleans or
+/// numbers are stored as such, anything else as a string. The existing
+/// file must be valid (it is never overwritten otherwise) and the result is
+/// validated before the atomic write. Creates the file if it is missing.
+pub fn set_many(path: &Path, values: &[(&str, &str)]) -> Result<Settings, ConfigError> {
+    let text = match load(path)? {
+        Some(_) => std::fs::read_to_string(path).map_err(|e| ConfigError::Io(path.into(), e))?,
+        None => format!("version = {CONFIG_VERSION}\n"),
+    };
+    let mut doc: toml_edit::DocumentMut = text
+        .parse()
+        .map_err(|e: toml_edit::TomlError| ConfigError::Parse(path.into(), e.to_string()))?;
+    for (key, raw) in values {
+        let invalid = |m: String| ConfigError::Invalid(path.into(), m);
+        let (table, field) = key
+            .split_once('.')
+            .filter(|(t, f)| !t.is_empty() && !f.is_empty() && !f.contains('.'))
+            .ok_or_else(|| invalid(format!("key {key:?} must look like table.key")))?;
+        let value = match raw.parse::<toml_edit::Value>() {
+            Ok(
+                v @ (toml_edit::Value::Boolean(_)
+                | toml_edit::Value::Integer(_)
+                | toml_edit::Value::Float(_)),
+            ) => v,
+            _ => toml_edit::Value::from(*raw),
+        };
+        let t = doc
+            .entry(table)
+            .or_insert_with(toml_edit::table)
+            .as_table_like_mut()
+            .ok_or_else(|| invalid(format!("{table} is not a table")))?;
+        match t.get_mut(field).and_then(|i| i.as_value_mut()) {
+            // Replace only the value so comments attached to the key stay.
+            Some(v) => {
+                let decor = v.decor().clone();
+                *v = value;
+                *v.decor_mut() = decor;
+            }
+            None => {
+                t.insert(field, toml_edit::Item::Value(value));
+            }
+        }
+    }
+    let new_text = doc.to_string();
+    let (_, settings) = parse(path, &new_text)?;
+    write_atomic(path, new_text.as_bytes()).map_err(|e| ConfigError::Io(path.into(), e))?;
+    Ok(settings)
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -433,9 +491,7 @@ pub fn save(path: &Path, cfg: &Config) -> io::Result<()> {
     }
     let result = (|| {
         let mut f = opts.open(&tmp)?;
-        f.write_all(b"# Now You See Me configuration. See docs/configuration.md.\n")?;
-        f.write_all(cfg.to_toml().as_bytes())?;
-        f.write_all(EXAMPLE_RULE.as_bytes())?;
+        f.write_all(bytes)?;
         f.sync_all()?;
         std::fs::rename(&tmp, path)
     })();
@@ -460,6 +516,42 @@ mod tests {
         assert_eq!(back, c);
         assert_eq!(s.interval, Duration::from_secs(1));
         assert_eq!(s.rules.len(), alerts::default_rules().len());
+    }
+
+    #[test]
+    fn set_keeps_comments_and_validates() {
+        let dir = std::env::temp_dir().join(format!("nysm-cfg-set-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("config.toml");
+        // Missing file: created with just the new values.
+        let s = set_many(&path, &[("display.theme", "dark")]).unwrap();
+        assert_eq!(s.theme, Theme::Dark);
+        std::fs::write(
+            &path,
+            "# my notes\nversion = 1\n\n[sampling]\n# keep this\ninterval = \"1s\"\n",
+        )
+        .unwrap();
+        let s = set_many(
+            &path,
+            &[("sampling.interval", "2s"), ("incidents.enabled", "true")],
+        )
+        .unwrap();
+        assert_eq!(s.interval, Duration::from_secs(2));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("# my notes") && text.contains("# keep this"),
+            "{text}"
+        );
+        assert!(text.contains("enabled = true"), "{text}");
+        // Invalid result: rejected, file unchanged.
+        assert!(set_many(&path, &[("sampling.interval", "fast")]).is_err());
+        assert!(set_many(&path, &[("nonsense", "1")]).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        // Invalid existing file: never overwritten.
+        std::fs::write(&path, "version = 1\n[sampling]\nbogus = 1\n").unwrap();
+        assert!(set_many(&path, &[("display.theme", "light")]).is_err());
+        assert!(std::fs::read_to_string(&path).unwrap().contains("bogus"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

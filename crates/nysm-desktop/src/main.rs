@@ -5,6 +5,7 @@
 mod chart;
 mod pages;
 mod proctable;
+mod settings;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -192,8 +193,13 @@ fn engine_config(s: &nysm_config::Settings) -> nysm_engine::EngineConfig {
 }
 
 /// Window shortcuts: Alt+1…7 pages (numbered like the TUI's views 1–7),
-/// Ctrl+F process filter, Ctrl+W / Ctrl+Q close.
-fn install_shortcuts(window: &gtk::ApplicationWindow, stack: &gtk::Stack, ui: &Rc<pages::Pages>) {
+/// Ctrl+F process filter, Ctrl+, settings, Ctrl+W / Ctrl+Q close.
+fn install_shortcuts(
+    window: &gtk::ApplicationWindow,
+    stack: &gtk::Stack,
+    ui: &Rc<pages::Pages>,
+    settings_btn: &gtk::Button,
+) {
     let sc = gtk::ShortcutController::new();
     sc.set_scope(gtk::ShortcutScope::Global);
     let add = |trigger: &str, f: Box<dyn Fn()>| {
@@ -225,6 +231,8 @@ fn install_shortcuts(window: &gtk::ApplicationWindow, stack: &gtk::Stack, ui: &R
     }
     let u = ui.clone();
     add("<Control>f", Box::new(move || u.focus_process_search()));
+    let b = settings_btn.clone();
+    add("<Control>comma", Box::new(move || b.emit_clicked()));
     for t in ["<Control>w", "<Control>q"] {
         let w = window.clone();
         add(t, Box::new(move || w.close()));
@@ -321,6 +329,9 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
         Theme::Light => 1,
         Theme::Dark => 2,
     });
+    let settings_btn = gtk::Button::from_icon_name("emblem-system-symbolic");
+    settings_btn.set_tooltip_text(Some("Settings"));
+    header.pack_end(&settings_btn);
     header.pack_end(&theme_dd);
     header.pack_end(&range);
     header.pack_end(&status);
@@ -335,6 +346,7 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
                 _ => Theme::System,
             };
             apply_theme(&w, t);
+            settings::save_theme(t);
         });
     }
     if theme == Theme::System
@@ -368,6 +380,7 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
         stack.set_visible_child_name(p);
     }
 
+    let attached = source.is_remote();
     let state = Rc::new(RefCell::new(Loop {
         source,
         cgroups_on: false,
@@ -432,7 +445,11 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
             dd.connect_selected_notify(move |_| state.borrow_mut().last_seq = 0);
         }
     }
-    install_shortcuts(&window, &stack, &ui);
+    install_shortcuts(&window, &stack, &ui, &settings_btn);
+    {
+        let (w, settings) = (window.clone(), settings.clone());
+        settings_btn.connect_clicked(move |_| settings::open(&w, &settings, attached));
+    }
     window.present();
 
     if let Some(path) = args.screenshot.clone() {

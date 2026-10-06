@@ -421,6 +421,9 @@ pub enum ConfigAction {
     },
     /// Validate the config file; exit 2 if invalid.
     Check,
+    /// Set one value, e.g. `sampling.interval 2s` or `display.theme dark`.
+    /// Keeps the file's comments; refuses invalid values and invalid files.
+    Set { key: String, value: String },
 }
 
 pub struct Ctx {

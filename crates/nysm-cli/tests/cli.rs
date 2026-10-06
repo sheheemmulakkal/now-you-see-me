@@ -304,7 +304,23 @@ fn config_lifecycle_and_invalid_config_fallback() {
         "no silent overwrite"
     );
     assert_eq!(run(&["config", "check"]).status.code(), Some(0));
+    assert_eq!(
+        run(&["config", "set", "sampling.interval", "2s"])
+            .status
+            .code(),
+        Some(0)
+    );
+    assert_eq!(
+        run(&["config", "set", "sampling.interval", "soon"])
+            .status
+            .code(),
+        Some(2),
+        "invalid value rejected"
+    );
+    let o = run(&["config", "show"]);
+    assert!(String::from_utf8_lossy(&o.stdout).contains("interval = \"2s\""));
     let mut text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("See docs/configuration.md"), "comments kept");
     text.push_str("\n[[alerts.rules]]\nid = \"always\"\nmetric = \"cpu_pct\"\nthreshold = -1.0\nclear = -2.0\nfor_s = 0.0\n");
     std::fs::write(&path, &text).unwrap();
     let o = run(&["alerts", "--list"]);

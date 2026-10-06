@@ -69,11 +69,12 @@ Screen-reader (Orca) testing has not been done.
 | Ctrl+F | Processes page, focus the filter |
 | typing on the Processes page | starts filtering |
 | Enter / double-click on a process | details |
+| Ctrl+, | Settings (network unit, sample interval, history; saved to the config file) |
 | Ctrl+W, Ctrl+Q | close the window |
 
-The shortcut triggers are checked when the window starts (debug builds); key
-presses have not been exercised automatically, since the headless test display
-cannot inject them.
+Checked by hand with real key presses through the broadway web client: Alt+2,
+type-to-filter, Ctrl+F, Tab/Enter for details, Ctrl+, and Escape, and Ctrl+W.
+Not checked: choosing values in dropdown popups, because broadway does not draw them.
 
 ## Measured (reference machine, release, broadway, 30 s, embedded collector)
 | visible page | CPU % of one core | RSS |
@@ -90,6 +91,5 @@ place, so scroll position and selection are kept.
 
 ## Not yet done
 - libadwaita (`libadwaita-1-dev` is not installed on the dev machine;
-  installing it needs administrator rights); settings dialog;
-  screen-reader testing with Orca; key presses tested by hand on a real
-  session.
+  installing it needs administrator rights); screen-reader testing with
+  Orca; a check on a real (non-broadway) session.

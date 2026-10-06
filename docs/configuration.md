@@ -7,6 +7,7 @@ nysm config path            # where the file is looked for
 nysm config init [--force]  # write defaults (mode 0600, atomic rename)
 nysm config show            # effective configuration
 nysm config check           # validate; exit 2 if invalid
+nysm config set sampling.interval 2s  # change one value, keeping comments
 nysm --config other.toml …  # use another file for one invocation
 ```
 
@@ -50,6 +51,14 @@ cooldown_s = 600.0
 ```
 
 Precedence: command-line flag > config file > built-in default.
+
+## Editing from the CLI or the desktop app
+`nysm config set TABLE.KEY VALUE` and the desktop Settings dialog (gear
+button, Ctrl+,) change only the named keys and keep the file's comments and
+layout. The result is validated before an atomic write, so an invalid value is
+rejected with the file left unchanged. An existing file that is already invalid
+is never overwritten; fix it first. The desktop theme selector also saves
+`display.theme`.
 
 ## Validation and recovery
 - Unknown keys are errors (typos are not silently ignored).

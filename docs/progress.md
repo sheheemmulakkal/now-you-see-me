@@ -14,6 +14,8 @@ Read this first when resuming. Newest entry on top.
 - Desktop process list is a virtualized GtkColumnView listing every
   process (was capped at 200); 2.0 % CPU on the Processes page.
 - Desktop keyboard shortcuts (Alt+1…7 like the TUI, Ctrl+F, Ctrl+W/Q, type-to-filter).
+- `nysm config set` and a desktop Settings dialog (format-preserving via
+  toml_edit; refuses invalid input and never overwrites an invalid file).
 - SSH remote testing on real hardware paused (no second machine).
 
 ## 2026-10-06 — paused by the user (resume here)

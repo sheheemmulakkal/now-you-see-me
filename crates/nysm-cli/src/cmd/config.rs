@@ -1,4 +1,4 @@
-//! `nysm config path|show|init|check`.
+//! `nysm config path|show|init|check|set`.
 
 use std::io::{self, Write};
 
@@ -51,6 +51,18 @@ pub fn run(ctx: &Ctx, action: ConfigAction, load_error: Option<ConfigError>) -> 
                 }
             }
             Ok(exit::OK)
+        }
+        ConfigAction::Set { key, value } => {
+            match nysm_config::set_many(&path, &[(key.as_str(), value.as_str())]) {
+                Ok(_) => {
+                    writeln!(out, "{key} = {value:?} saved to {}", path.display())?;
+                    Ok(exit::OK)
+                }
+                Err(e) => {
+                    eprintln!("nysm: not saved: {e}");
+                    Ok(exit::USAGE)
+                }
+            }
         }
         ConfigAction::Init { force } => {
             if path.exists() && !force {

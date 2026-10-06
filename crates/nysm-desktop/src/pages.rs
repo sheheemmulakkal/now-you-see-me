@@ -383,8 +383,17 @@ impl Pages {
         details_card.append(&proc_details);
         split.append(&details_card);
         pp.append(&split);
-        // Typing anywhere on the page starts filtering.
+        // Typing anywhere on the page starts filtering; focus moves into
+        // the table when the page opens so key presses reach the page.
         proc_search.set_key_capture_widget(Some(&pp));
+        {
+            let view = proc_table.view.clone();
+            stack.connect_visible_child_name_notify(move |st| {
+                if st.visible_child_name().is_some_and(|n| n == "processes") {
+                    view.grab_focus();
+                }
+            });
+        }
 
         // ---------------- CPU
         let cp = page(stack, "cpu", "CPU");

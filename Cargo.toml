@@ -36,6 +36,7 @@ libc = "0.2"
 clap = { version = "4.6", features = ["derive"] }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "layout-cache"] }
 toml = "1.1"
+toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
 
 # Line tables keep backtraces useful while cutting debug build size several-fold.
 [profile.dev]
