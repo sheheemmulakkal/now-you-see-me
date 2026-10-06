@@ -6,6 +6,7 @@ mod chart;
 mod pages;
 mod proctable;
 mod settings;
+mod stats;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -27,6 +28,8 @@ const CSS: &str = "
 .big-value { font-size: 2.1em; font-weight: 300; font-feature-settings: \"tnum\"; }
 .mid-value { font-size: 1.35em; font-weight: 400; font-feature-settings: \"tnum\"; }
 .numeric { font-feature-settings: \"tnum\"; }
+.stat { background-color: alpha(currentColor, 0.04); border-radius: 8px; padding: 8px 10px; }
+.stat-value { font-size: 1.25em; font-weight: 500; font-feature-settings: \"tnum\"; }
 .caption { font-size: 0.85em; }
 .c-net-rx { color: #4f8cff; } .c-net-tx { color: #a66bff; }
 .c-disk-r { color: #f5a623; } .c-disk-w { color: #ed7321; }
@@ -133,6 +136,47 @@ fn system_prefers_dark() -> Option<bool> {
     Some(gio::Settings::new("org.gnome.desktop.interface").string("color-scheme") == "prefer-dark")
 }
 
+/// Whether a GTK 4 theme of this name is installed.
+fn gtk4_theme_exists(name: &str) -> bool {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(h) = std::env::var_os("HOME") {
+        let h = std::path::PathBuf::from(h);
+        dirs.push(h.join(".themes"));
+        dirs.push(h.join(".local/share/themes"));
+    }
+    let data =
+        std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
+    dirs.extend(
+        data.split(':')
+            .filter(|d| !d.is_empty())
+            .map(|d| std::path::Path::new(d).join("themes")),
+    );
+    dirs.iter().any(|d| d.join(name).join("gtk-4.0").is_dir())
+}
+
+/// The theme name to use for a light or dark window, given the desktop's
+/// theme. Variant themes such as Yaru-dark ignore "prefer dark", so the
+/// matching light/dark variant is chosen; GTK's built-in Adwaita handles
+/// both through "prefer dark".
+fn theme_variant(base: &str, dark: bool, exists: impl Fn(&str) -> bool) -> String {
+    let light = base.strip_suffix("-dark").unwrap_or(base);
+    if dark {
+        let d = format!("{light}-dark");
+        if exists(&d) { d } else { base.to_string() }
+    } else if light != base && exists(light) {
+        light.to_string()
+    } else if light != base {
+        "Adwaita".into()
+    } else {
+        base.to_string()
+    }
+}
+
+thread_local! {
+    /// The desktop's GTK theme at startup, restored for Theme::System.
+    static DESKTOP_THEME: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
 fn apply_theme(window: &gtk::ApplicationWindow, theme: Theme) {
     let dark = match theme {
         Theme::Dark => true,
@@ -140,6 +184,25 @@ fn apply_theme(window: &gtk::ApplicationWindow, theme: Theme) {
         Theme::System => system_prefers_dark().unwrap_or(false),
     };
     if let Some(gs) = gtk::Settings::default() {
+        let base = DESKTOP_THEME.with(|t| {
+            t.borrow_mut()
+                .get_or_insert_with(|| {
+                    gs.gtk_theme_name()
+                        .map(|n| n.to_string())
+                        .unwrap_or_default()
+                })
+                .clone()
+        });
+        if !base.is_empty() {
+            let name = if theme == Theme::System {
+                base
+            } else {
+                theme_variant(&base, dark, gtk4_theme_exists)
+            };
+            if gs.gtk_theme_name().as_deref() != Some(name.as_str()) {
+                gs.set_gtk_theme_name(Some(&name));
+            }
+        }
         gs.set_gtk_application_prefer_dark_theme(dark);
     }
     if dark {
@@ -586,4 +649,19 @@ fn screenshot(window: &gtk::ApplicationWindow, path: &std::path::Path) -> Result
         .ok_or("no renderer")?;
     let texture = renderer.render_texture(&node, Some(&gtk::graphene::Rect::new(0.0, 0.0, w, h)));
     texture.save_to_png(path).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::theme_variant;
+
+    #[test]
+    fn picks_light_and_dark_variants() {
+        let have = |n: &str| ["Yaru", "Yaru-dark"].contains(&n);
+        assert_eq!(theme_variant("Yaru-dark", false, have), "Yaru");
+        assert_eq!(theme_variant("Yaru-dark", true, have), "Yaru-dark");
+        assert_eq!(theme_variant("Yaru", true, have), "Yaru-dark");
+        assert_eq!(theme_variant("Adwaita", true, have), "Adwaita");
+        assert_eq!(theme_variant("Foo-dark", false, have), "Adwaita");
+    }
 }

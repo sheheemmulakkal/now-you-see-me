@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+exclude = ["vendor"]
 # The GTK desktop app needs GTK development files; keep it out of default
 # builds so headless/server builds never require graphical libraries.
 default-members = [
@@ -46,3 +47,7 @@ debug = "line-tables-only"
 lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
+
+# ksni with the Ayatana label (text next to the tray icon); see vendor/ksni/PATCHED.md.
+[patch.crates-io]
+ksni = { path = "vendor/ksni" }

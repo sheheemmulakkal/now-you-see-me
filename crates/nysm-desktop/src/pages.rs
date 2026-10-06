@@ -20,6 +20,7 @@ use nysm_core::{Reading, Status};
 
 use crate::chart::{self, Chart, Series};
 use crate::proctable::{self, ProcTable};
+use crate::stats::{self, CoreTile, Tile};
 
 /// Cap for the (non-virtualized) group list.
 const MAX_LIST_ROWS: usize = 200;
@@ -117,6 +118,20 @@ fn psi_text(r: &Reading<Pressure>) -> String {
         }
         None if r.status == Status::Unsupported => "pressure n/a".into(),
         None => format!("pressure {}", r.status.label()),
+    }
+}
+
+/// (value, hint) for a pressure tile: the stall share over the last
+/// sample, with the kernel's 1-minute average as context.
+fn psi_tile(r: &Reading<Pressure>) -> (String, String) {
+    match r.live() {
+        Some(p) => (
+            p.some
+                .interval_pct
+                .map_or("—".into(), |v| format!("{v:.1}%")),
+            format!("1 min avg {:.1}%", p.some.avg60_pct),
+        ),
+        None => ("—".into(), r.status.label().into()),
     }
 }
 
@@ -237,11 +252,13 @@ pub struct Pages {
     proc_state: Rc<RefCell<ProcState>>,
     details_cb: DetailsCallback,
     // CPU
-    cpu_info: gtk::Label,
+    cpu_stats: Vec<Tile>,
     cpu_page_chart: Chart,
     cpu_cores: gtk::FlowBox,
+    core_tiles: RefCell<Vec<CoreTile>>,
+    core_seq: std::cell::Cell<u64>,
     // Memory
-    mem_info: gtk::Label,
+    mem_stats: Vec<Tile>,
     mem_chart: Chart,
     mem_psi_chart: Chart,
     // Network
@@ -398,24 +415,73 @@ impl Pages {
         // ---------------- CPU
         let cp = page(stack, "cpu", "CPU");
         let (c1, _) = card("Usage, % of all logical cores");
-        let cpu_info = label("", &[]);
-        c1.append(&cpu_info);
+        let (cpu_grid, cpu_stats) = stats::grid(&[
+            ("Usage", "Share of all logical cores that were busy"),
+            ("User", "Time running application code"),
+            ("System", "Time running kernel code for applications"),
+            ("Nice", "Time running low-priority (niced) processes"),
+            ("Interrupts", "Hardware and software interrupt handling"),
+            (
+                "I/O wait",
+                "Idle time while disk I/O was pending. Not CPU work, and not counted as busy",
+            ),
+            ("Steal", "Time a hypervisor gave to other virtual machines"),
+            (
+                "Load average",
+                "Run-queue length (running + waiting tasks), not a percentage. Compare with the number of cores",
+            ),
+            (
+                "Pressure",
+                "Share of time at least one task waited for a CPU (PSI \"some\")",
+            ),
+        ]);
+        c1.append(&cpu_grid);
         let cpu_page_chart = Chart::new(170, Some(100.0), pct);
         c1.append(&cpu_page_chart.area);
         cp.append(&c1);
-        let (c2, _) = card("Logical cores (usage, current frequency)");
+        let (c2, _) = card("Cores");
+        c2.append(&label(
+            "Logical CPUs as the kernel schedules them: usage, current frequency and the last 2 minutes. \
+             With hyper-threading, two logical CPUs share one physical core.",
+            &["dim-label", "caption"],
+        ));
         let cpu_cores = gtk::FlowBox::new();
         cpu_cores.set_selection_mode(gtk::SelectionMode::None);
+        cpu_cores.set_min_children_per_line(2);
         cpu_cores.set_max_children_per_line(8);
         cpu_cores.set_homogeneous(true);
+        cpu_cores.set_row_spacing(8);
+        cpu_cores.set_column_spacing(8);
         c2.append(&cpu_cores);
         cp.append(&c2);
 
         // ---------------- Memory
         let mp = page(stack, "memory", "Memory");
         let (m1, _) = card("Used memory (total − available), %");
-        let mem_info = label("", &[]);
-        m1.append(&mem_info);
+        let (mem_grid, mem_stats) = stats::grid(&[
+            ("Used", "Total minus available"),
+            (
+                "Available",
+                "Kernel estimate of memory usable without swapping, including reclaimable cache",
+            ),
+            (
+                "Cache",
+                "File contents cached in memory; reclaimed when needed",
+            ),
+            (
+                "Reclaimable slab",
+                "Kernel caches that can be freed under pressure",
+            ),
+            ("Shared", "Shared memory and tmpfs"),
+            ("Dirty", "Modified file data not yet written to disk"),
+            ("Swap used", "Memory moved to swap"),
+            ("Swapping", "Pages read from / written to swap per second"),
+            (
+                "Pressure",
+                "Share of time at least one task stalled waiting for memory (PSI \"some\")",
+            ),
+        ]);
+        m1.append(&mem_grid);
         let mem_chart = Chart::new(150, Some(100.0), pct);
         m1.append(&mem_chart.area);
         mp.append(&m1);
@@ -532,10 +598,12 @@ impl Pages {
                 rendered_ts: None,
             })),
             details_cb: Rc::new(RefCell::new(None)),
-            cpu_info,
+            cpu_stats,
             cpu_page_chart,
             cpu_cores,
-            mem_info,
+            core_tiles: RefCell::new(Vec::new()),
+            core_seq: std::cell::Cell::new(0),
+            mem_stats,
             mem_chart,
             mem_psi_chart,
             net_chart,
@@ -662,6 +730,7 @@ impl Pages {
         alerts: &[ActiveAlert],
         visible: &str,
     ) {
+        self.record_cores(s);
         // Restrict charts to the selected time window.
         let newest = history.last().map_or(0, |p| p.timestamp_ms);
         let cutoff = newest - (self.window_s.get() * 1000.0) as i64;
@@ -938,22 +1007,33 @@ impl Pages {
         }
 
         if visible == "cpu" {
-            self.cpu_info.set_text(&match c.usage.live() {
-                Some(u) => format!(
-                    "{:.1}% now — user {:.1} · nice {:.1} · system {:.1} · irq {:.1} · iowait {:.1} · steal {:.1}\n\
-                     Load {} (run-queue length, not a percentage) · {}. iowait is idle time with I/O pending, not CPU work.",
-                    u.total_pct,
-                    u.user_pct,
-                    u.nice_pct,
-                    u.system_pct,
-                    u.irq_pct,
-                    u.iowait_pct,
-                    u.steal_pct,
-                    c.load.live().map_or("—".into(), |l| format!("{:.2} {:.2} {:.2}", l.one, l.five, l.fifteen)),
-                    psi_text(&c.pressure)
+            let t = &self.cpu_stats;
+            match c.usage.live() {
+                Some(u) => {
+                    let p = |v: f64| format!("{v:.1}%");
+                    t[0].set(&p(u.total_pct), &format!("of {cores} logical cores"));
+                    t[1].set(&p(u.user_pct), "");
+                    t[2].set(&p(u.system_pct), "");
+                    t[3].set(&p(u.nice_pct), "");
+                    t[4].set(&p(u.irq_pct), "");
+                    t[5].set(&p(u.iowait_pct), "not busy");
+                    t[6].set(&p(u.steal_pct), "");
+                }
+                None => {
+                    for x in &t[..7] {
+                        x.set("—", c.usage.status.label());
+                    }
+                }
+            }
+            match c.load.live() {
+                Some(l) => t[7].set(
+                    &format!("{:.2}", l.one),
+                    &format!("5 min {:.2} · 15 min {:.2}", l.five, l.fifteen),
                 ),
-                None => format!("CPU {}", missing(&c.usage)),
-            });
+                None => t[7].set("—", c.load.status.label()),
+            }
+            let (pv, ph) = psi_tile(&c.pressure);
+            t[8].set(&pv, &ph);
             self.cpu_page_chart.set(cpu_series(), g.clone(), span);
             self.cpu_page_chart
                 .set_summary(&format!("CPU usage history, {span_text}"));
@@ -961,33 +1041,40 @@ impl Pages {
         }
 
         if visible == "memory" {
-            self.mem_info.set_text(&match m.usage.live() {
+            let t = &self.mem_stats;
+            let b = |v: u64| units::bytes(v as f64);
+            let o = |v: Option<u64>| v.map_or("—".into(), b);
+            match m.usage.live() {
                 Some(u) => {
-                    let o = |v: Option<u64>| v.map_or("—".into(), |v| units::bytes(v as f64));
-                    format!(
-                        "{} of {} ({:.1}%) · {} available (kernel estimate incl. reclaimable cache)\n\
-                         cache {} · reclaimable slab {} · shared {} · dirty {} · swap {} · swapping {} · {}",
-                        units::bytes(u.used_bytes as f64),
-                        units::bytes(u.total_bytes as f64),
-                        u.used_pct,
-                        units::bytes(u.available_bytes as f64),
-                        o(u.cache_bytes),
-                        o(u.reclaimable_slab_bytes),
-                        o(u.shared_bytes),
-                        o(u.dirty_bytes),
-                        m.swap.live().map_or_else(
-                            || missing(&m.swap),
-                            |w| format!("{} of {}", units::bytes(w.used_bytes as f64), units::bytes(w.total_bytes as f64))
-                        ),
-                        m.swap_activity.live().map_or_else(
-                            || missing(&m.swap_activity),
-                            |a| format!("in {} out {}", bytes_rate(a.in_bytes_per_s), bytes_rate(a.out_bytes_per_s))
-                        ),
-                        psi_text(&m.pressure)
-                    )
+                    t[0].set(
+                        &b(u.used_bytes),
+                        &format!("{:.1}% of {}", u.used_pct, b(u.total_bytes)),
+                    );
+                    t[1].set(&b(u.available_bytes), "incl. reclaimable cache");
+                    t[2].set(&o(u.cache_bytes), "");
+                    t[3].set(&o(u.reclaimable_slab_bytes), "");
+                    t[4].set(&o(u.shared_bytes), "");
+                    t[5].set(&o(u.dirty_bytes), "");
                 }
-                None => format!("Memory {}", missing(&m.usage)),
-            });
+                None => {
+                    for x in &t[..6] {
+                        x.set("—", m.usage.status.label());
+                    }
+                }
+            }
+            match m.swap.live() {
+                Some(w) => t[6].set(&b(w.used_bytes), &format!("of {}", b(w.total_bytes))),
+                None => t[6].set("—", m.swap.status.label()),
+            }
+            match m.swap_activity.live() {
+                Some(a) => t[7].set(
+                    &format!("{} in", bytes_rate(a.in_bytes_per_s)),
+                    &format!("{} out", bytes_rate(a.out_bytes_per_s)),
+                ),
+                None => t[7].set("—", m.swap_activity.status.label()),
+            }
+            let (pv, ph) = psi_tile(&m.pressure);
+            t[8].set(&pv, &ph);
             self.mem_chart.set(mem_series(), g.clone(), span);
             self.mem_chart
                 .set_summary(&format!("Memory used history, {span_text}"));
@@ -1176,53 +1263,41 @@ impl Pages {
         hide_rows_from(&self.groups_list, n + 1);
     }
 
-    fn update_cores(&self, s: &Snapshot) {
-        let c = &s.cpu;
-        let mut n_children = 0;
-        let mut ch = self.cpu_cores.first_child();
-        while let Some(w) = ch {
-            n_children += 1;
-            ch = w.next_sibling();
+    /// Per-core history is kept here for every new snapshot (the shared
+    /// history only has totals); tiles are drawn when the page is visible.
+    fn record_cores(&self, s: &Snapshot) {
+        if s.seq == self.core_seq.get() {
+            return;
         }
-        if n_children != c.per_core.len() {
+        self.core_seq.set(s.seq);
+        let per_core = &s.cpu.per_core;
+        let mut tiles = self.core_tiles.borrow_mut();
+        if tiles.len() != per_core.len() {
             while let Some(ch) = self.cpu_cores.first_child() {
                 self.cpu_cores.remove(&ch);
             }
-            for _ in &c.per_core {
-                let b = gtk::Box::new(gtk::Orientation::Vertical, 4);
-                b.append(&label("", &["numeric"]));
-                b.append(&gtk::LevelBar::for_interval(0.0, 100.0));
-                self.cpu_cores.insert(&b, -1);
+            tiles.clear();
+            for _ in per_core {
+                let (w, t) = CoreTile::new();
+                self.cpu_cores.insert(&w, -1);
+                tiles.push(t);
             }
         }
-        let mut child = self.cpu_cores.first_child();
-        for core in &c.per_core {
-            let Some(fc) = child.clone() else { break };
-            if let Some(b) = fc.first_child() {
-                let txt = format!(
-                    "cpu{}  {}  {}",
-                    core.id,
-                    core.usage_pct
-                        .live()
-                        .map_or("—".into(), |v| format!("{v:.0}%")),
-                    core.frequency_mhz
-                        .live()
-                        .map_or(String::new(), |f| format!("{:.2} GHz", f / 1000.0))
-                );
-                if let Some(l) = b
-                    .first_child()
-                    .and_then(|w| w.downcast::<gtk::Label>().ok())
-                {
-                    l.set_text(&txt);
-                }
-                if let Some(lb) = b
-                    .last_child()
-                    .and_then(|w| w.downcast::<gtk::LevelBar>().ok())
-                {
-                    lb.set_value(core.usage_pct.live().copied().unwrap_or(0.0));
-                }
-            }
-            child = fc.next_sibling();
+        for (t, core) in tiles.iter_mut().zip(per_core) {
+            t.push(core.usage_pct.live().copied());
+        }
+    }
+
+    fn update_cores(&self, s: &Snapshot) {
+        let span =
+            stats::CORE_HISTORY as f64 * s.interval_ms.unwrap_or(1000).max(1) as f64 / 1000.0;
+        for (t, core) in self.core_tiles.borrow().iter().zip(&s.cpu.per_core) {
+            t.show(
+                core.id,
+                core.usage_pct.live().copied(),
+                core.frequency_mhz.live().copied(),
+                span,
+            );
         }
     }
 

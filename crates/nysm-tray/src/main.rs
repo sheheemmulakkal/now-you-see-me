@@ -27,7 +27,18 @@ struct NysmTray {
     stale: bool,
     source: String,
     rate: RateUnit,
+    /// Show the text label next to the icon (Ayatana hosts, e.g. Ubuntu).
+    show_label: bool,
     quit: Arc<AtomicBool>,
+}
+
+/// Compact size for the top bar: "6.2G", "512M".
+fn short_bytes(n: f64) -> String {
+    let s = units::bytes(n);
+    match s.split_once(' ') {
+        Some((v, unit)) => format!("{v}{}", &unit[..1]),
+        None => s,
+    }
 }
 
 /// Menu labels treat `_` as a mnemonic marker; show it literally.
@@ -44,6 +55,31 @@ fn psi(r: &Reading<Pressure>) -> String {
 }
 
 impl NysmTray {
+    /// "24% · 6.2G · ↓1.8 MiB/s ↑240 KiB/s"; dashes for values not yet known.
+    fn label_text(&self) -> String {
+        let Some(s) = &self.snap else {
+            return "…".into();
+        };
+        let cpu = s
+            .cpu
+            .usage
+            .live()
+            .map_or("—".into(), |c| format!("{:.0}%", c.total_pct));
+        let mem = s
+            .memory
+            .usage
+            .live()
+            .map_or("—".into(), |m| short_bytes(m.used_bytes as f64));
+        let (rx, tx) = match s.network.total.live() {
+            Some(n) => (
+                units::rate(n.rx_bytes_per_s, self.rate),
+                units::rate(n.tx_bytes_per_s, self.rate),
+            ),
+            None => ("—".into(), "—".into()),
+        };
+        format!("{cpu} · {mem} · ↓{rx} ↑{tx}")
+    }
+
     fn lines(&self) -> Vec<String> {
         let Some(s) = &self.snap else {
             return vec!["Collecting…".into()];
@@ -153,6 +189,23 @@ impl ksni::Tray for NysmTray {
         vec![icon::render(22, m), icon::render(44, m)]
     }
 
+    fn label(&self) -> String {
+        if self.show_label {
+            self.label_text()
+        } else {
+            String::new()
+        }
+    }
+
+    fn label_guide(&self) -> String {
+        // Widest typical label, so the panel reserves a stable width.
+        if self.show_label {
+            "100% · 99.9G · ↓999 MiB/s ↑999 MiB/s".into()
+        } else {
+            String::new()
+        }
+    }
+
     fn tool_tip(&self) -> ToolTip {
         let mut lines = self.lines();
         lines.truncate(3);
@@ -244,14 +297,19 @@ fn describe(source: &Source) -> String {
 
 fn main() {
     let mut attach = Attach::Auto;
+    let mut show_label = true;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
+        if a == "--no-label" {
+            show_label = false;
+            continue;
+        }
         match (a.as_str(), args.next().as_deref()) {
             ("--attach", Some("auto")) => attach = Attach::Auto,
             ("--attach", Some("never")) => attach = Attach::Never,
             ("--attach", Some("require")) => attach = Attach::Require,
             _ => {
-                eprintln!("usage: nysm-tray [--attach auto|never|require]");
+                eprintln!("usage: nysm-tray [--attach auto|never|require] [--no-label]");
                 std::process::exit(2);
             }
         }
@@ -282,6 +340,7 @@ fn main() {
         stale: false,
         source: describe(&source),
         rate: settings.rate_unit,
+        show_label,
         quit: quit.clone(),
     };
     let handle = match tray.spawn() {
