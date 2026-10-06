@@ -13,6 +13,7 @@ Read this first when resuming. Newest entry on top.
   robust.
 - Desktop process list is a virtualized GtkColumnView listing every
   process (was capped at 200); 2.0 % CPU on the Processes page.
+- Desktop keyboard shortcuts (Alt+1…7 like the TUI, Ctrl+F, Ctrl+W/Q, type-to-filter).
 - SSH remote testing on real hardware paused (no second machine).
 
 ## 2026-10-06 — paused by the user (resume here)

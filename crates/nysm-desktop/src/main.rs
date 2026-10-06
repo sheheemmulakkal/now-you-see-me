@@ -191,6 +191,47 @@ fn engine_config(s: &nysm_config::Settings) -> nysm_engine::EngineConfig {
     }
 }
 
+/// Window shortcuts: Alt+1…7 pages (numbered like the TUI's views 1–7),
+/// Ctrl+F process filter, Ctrl+W / Ctrl+Q close.
+fn install_shortcuts(window: &gtk::ApplicationWindow, stack: &gtk::Stack, ui: &Rc<pages::Pages>) {
+    let sc = gtk::ShortcutController::new();
+    sc.set_scope(gtk::ShortcutScope::Global);
+    let add = |trigger: &str, f: Box<dyn Fn()>| {
+        let action = gtk::CallbackAction::new(move |_, _| {
+            f();
+            glib::Propagation::Stop
+        });
+        let parsed = gtk::ShortcutTrigger::parse_string(trigger);
+        debug_assert!(parsed.is_some(), "invalid shortcut {trigger}");
+        sc.add_shortcut(gtk::Shortcut::new(parsed, Some(action)));
+    };
+    // Numbered like the TUI views, not the sidebar order.
+    const BY_NUMBER: [&str; 7] = [
+        "overview",
+        "processes",
+        "cpu",
+        "memory",
+        "network",
+        "storage",
+        "groups",
+    ];
+    for (i, name) in BY_NUMBER.into_iter().enumerate() {
+        debug_assert!(PAGES.iter().any(|p| p.0 == name));
+        let s = stack.clone();
+        add(
+            &format!("<Alt>{}", i + 1),
+            Box::new(move || s.set_visible_child_name(name)),
+        );
+    }
+    let u = ui.clone();
+    add("<Control>f", Box::new(move || u.focus_process_search()));
+    for t in ["<Control>w", "<Control>q"] {
+        let w = window.clone();
+        add(t, Box::new(move || w.close()));
+    }
+    window.add_controller(sc);
+}
+
 fn sidebar(stack: &gtk::Stack) -> gtk::Box {
     let list = gtk::ListBox::new();
     list.add_css_class("nav");
@@ -391,6 +432,7 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
             dd.connect_selected_notify(move |_| state.borrow_mut().last_seq = 0);
         }
     }
+    install_shortcuts(&window, &stack, &ui);
     window.present();
 
     if let Some(path) = args.screenshot.clone() {

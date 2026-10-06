@@ -62,6 +62,19 @@ scale and nothing overlaps; chart axis labels scale with DPI (10 px at
 screen; verified at 1024 px wide with 1.5× text.
 Screen-reader (Orca) testing has not been done.
 
+## Keyboard
+| keys | action |
+| --- | --- |
+| Alt+1 … Alt+7 | Overview, Processes, CPU, Memory, Network, Storage, Containers & services (numbered like the TUI's views 1–7) |
+| Ctrl+F | Processes page, focus the filter |
+| typing on the Processes page | starts filtering |
+| Enter / double-click on a process | details |
+| Ctrl+W, Ctrl+Q | close the window |
+
+The shortcut triggers are checked when the window starts (debug builds); key
+presses have not been exercised automatically, since the headless test display
+cannot inject them.
+
 ## Measured (reference machine, release, broadway, 30 s, embedded collector)
 | visible page | CPU % of one core | RSS |
 | --- | --- | --- |
@@ -77,7 +90,6 @@ place, so scroll position and selection are kept.
 
 ## Not yet done
 - libadwaita (`libadwaita-1-dev` is not installed on the dev machine;
-  installing it needs administrator rights); keyboard shortcuts beyond GTK
-  defaults; settings dialog; screen-reader testing with Orca; HiDPI and
-  large-text checks; packaging/installation of the `.desktop` file
-  (`packaging/linux/`).
+  installing it needs administrator rights); settings dialog;
+  screen-reader testing with Orca; key presses tested by hand on a real
+  session.

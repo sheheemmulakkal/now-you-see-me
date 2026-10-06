@@ -383,6 +383,8 @@ impl Pages {
         details_card.append(&proc_details);
         split.append(&details_card);
         pp.append(&split);
+        // Typing anywhere on the page starts filtering.
+        proc_search.set_key_capture_widget(Some(&pp));
 
         // ---------------- CPU
         let cp = page(stack, "cpu", "CPU");
@@ -623,6 +625,12 @@ impl Pages {
             .visible_child_name()
             .map(|s| s.to_string())
             .unwrap_or_default()
+    }
+
+    /// Show the Processes page and focus its filter.
+    pub fn focus_process_search(&self) {
+        self.stack.set_visible_child_name("processes");
+        self.proc_search.grab_focus();
     }
 
     pub fn set_source(&self, text: &str) {
