@@ -1,5 +1,6 @@
-//! About page: what the app is, how it collects and keeps data, what it
-//! costs (measured live from its own processes), privacy, files, licence.
+//! About page: what the app is, what is running and what it costs right
+//! now (measured live from its own processes), how it collects and keeps
+//! data, the top-bar labels, privacy, files and licence.
 
 use std::time::Duration;
 
@@ -8,144 +9,56 @@ use gtk::prelude::*;
 use nysm_core::snapshot::Snapshot;
 use nysm_core::units;
 
+use crate::stats::{self, Tile};
+
 pub struct About {
-    running: gtk::Label,
-    cost: gtk::Label,
+    status: Vec<Tile>,
+    totals: Vec<Tile>,
+    procs: gtk::Grid,
+    history: Duration,
+    interval: Duration,
 }
 
-fn section(parent: &gtk::Box, title: &str) -> gtk::Box {
-    let c = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    c.add_css_class("card");
-    let t = gtk::Label::new(Some(title));
-    t.set_xalign(0.0);
-    t.add_css_class("card-title");
-    c.append(&t);
-    parent.append(&c);
-    c
-}
-
-fn text(parent: &gtk::Box, markup: &str) -> gtk::Label {
+fn label(markup: &str, classes: &[&str]) -> gtk::Label {
     let l = gtk::Label::new(None);
     l.set_markup(markup);
     l.set_xalign(0.0);
     l.set_wrap(true);
-    l.set_selectable(true);
-    l.set_max_width_chars(100);
-    parent.append(&l);
+    l.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    for c in classes {
+        l.add_css_class(c);
+    }
     l
 }
 
-/// Build the page into `page` (a vertical box from the page stack).
-pub fn build(page: &gtk::Box, history: Duration, interval: Duration) -> About {
-    let version = env!("CARGO_PKG_VERSION");
-    let s = section(page, "What it is");
-    text(
-        &s,
-        &format!(
-            "<b>{}</b> {version} shows what this computer is doing: how busy CPU, memory, \
-             disks and network are, what changed in the last minutes, <i>which</i> process or \
-             container is responsible, and whether work is <i>waiting</i> on a resource \
-             (pressure). Values that cannot be measured are shown with the reason, never as 0.",
-            nysm_core::brand::PRODUCT_NAME
-        ),
-    );
+fn card(title: &str) -> gtk::Box {
+    let c = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    c.add_css_class("card");
+    c.append(&label(&esc(title), &["card-title"]));
+    c
+}
 
-    let s = section(page, "The parts, and what is running now");
-    text(
-        &s,
-        "<b>Top bar</b> (nysm-tray): CPU, memory, network, storage and disk at a glance. \
-         <b>This window</b> (nysm-desktop): charts, processes, containers. \
-         <b>Terminal</b>: <tt>nysm</tt> commands and <tt>nysm tui</tt>. \
-         <b>Collector service</b> (<tt>nysm service run</tt>, optional): samples the machine once \
-         for all of them and keeps the shared history; without it each part collects for itself.",
-    );
-    let running = text(&s, "…");
-
-    let s = section(page, "How the numbers are collected");
-    text(
-        &s,
-        &format!(
-            "Read directly from the Linux kernel (<tt>/proc</tt>, <tt>/sys</tt>) as a normal \
-             user, every {} (processes every 2 s, filesystems every 15 s). Rates (CPU %, \
-             bytes/s) are the change between two samples. Other users' processes show \
-             \"permission denied\" for details the kernel only gives their owner; nothing is \
-             guessed. <b>Disk</b> in the top bar is how full <tt>/</tt> is (like <tt>df</tt>); \
-             <b>I/O</b> is how busy the busiest disk was; <b>R/W</b> are bytes read and written \
-             per second.",
-            units::duration_s(interval.as_secs_f64())
-        ),
-    );
-
-    let s = section(page, "History");
-    text(
-        &s,
-        &format!(
-            "The last <b>{}</b> are kept in memory by the collector (or by this window when no \
-             collector runs), so charts show the recent past as soon as a window opens. History \
-             is lost when the collector stops. Change the length in Settings (Ctrl+,), which \
-             shows the memory it needs. For long periods record to a file: \
-             <tt>nysm record -o day.nysm --duration 24h --interval 10s</tt>, then \
-             <tt>nysm compare day.nysm</tt>.",
-            human_span(history)
-        ),
-    );
-
-    let s = section(page, "What it costs");
-    text(
-        &s,
-        "Measured right now from this machine's process table (CPU as a share of all cores; \
-         memory resident):",
-    );
-    let cost = text(&s, "collecting…");
-    text(
-        &s,
-        "<small>Reference (Intel i5-7500, release builds): collector about 0.2 % of one core and \
-         3 MiB; tray 0.03–0.2 % and 4 MiB; this window about 2 % while visible and nothing \
-         while minimised or hidden; GNOME Shell spends about 1 % of one core more to redraw \
-         the top bar each second. Pages that are not shown are not updated.</small>",
-    );
-
-    let s = section(page, "Privacy and safety");
-    text(
-        &s,
-        "No network access except what you ask for (<tt>nysm net check</tt>, remote monitoring \
-         over your own SSH). No accounts, no telemetry. It never asks for root. Command lines \
-         are hidden unless you ask (<tt>nysm inspect --show-args</tt>) because they can hold \
-         passwords. Container names are opt-in because the Docker socket is root-equivalent. \
-         Files it writes are readable only by you.",
-    );
-
-    let s = section(page, "Files");
-    let cfg = nysm_config::default_path().map_or("—".into(), |p| p.display().to_string());
-    let state = nysm_config::default_incident_dir()
-        .and_then(|p| p.parent().map(|d| d.display().to_string()))
-        .unwrap_or_else(|| "—".into());
-    text(
-        &s,
-        &format!(
-            "Settings: <tt>{}</tt>\nSaved data (incident captures): <tt>{}</tt>\n\
-             Runtime (socket, tray images; cleared at logout): <tt>$XDG_RUNTIME_DIR/nysm</tt>\n\
-             Uninstall: <tt>~/.local/share/nysm/uninstall.sh</tt> (<tt>--purge</tt> also \
-             removes settings and saved data).",
-            esc(&cfg),
-            esc(&state)
-        ),
-    );
-
-    let s = section(page, "Licence");
-    text(
-        &s,
-        "MIT OR Apache-2.0, at your option. Third-party components and their licences are \
-         listed in THIRD-PARTY-LICENSES.txt. User guide: docs/guide.md.",
-    );
-    About { running, cost }
+/// A card with a symbolic icon next to its title, for the info grid.
+fn info_card(icon: &str, title: &str, markup: &str) -> gtk::Box {
+    let c = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    c.add_css_class("card");
+    let head = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let img = gtk::Image::from_icon_name(icon);
+    img.set_pixel_size(18);
+    head.append(&img);
+    head.append(&label(&esc(title), &["card-title"]));
+    c.append(&head);
+    let body = label(markup, &[]);
+    body.set_selectable(true);
+    c.append(&body);
+    c
 }
 
 /// "10 minutes", "1.5 hours", "2 hours".
 fn human_span(d: Duration) -> String {
     let m = d.as_secs_f64() / 60.0;
     if m < 1.0 {
-        format!("{} seconds", d.as_secs())
+        format!("{} s", d.as_secs())
     } else if m < 90.0 {
         format!(
             "{m:.0} minute{}",
@@ -161,53 +74,221 @@ fn human_span(d: Duration) -> String {
     }
 }
 
+/// Build the page into `page` (a vertical box from the page stack).
+pub fn build(page: &gtk::Box, history: Duration, interval: Duration) -> About {
+    // Header: icon, name, version, licence, one-line summary.
+    let hero = gtk::Box::new(gtk::Orientation::Horizontal, 18);
+    hero.add_css_class("card");
+    let icon = gtk::Image::from_icon_name("utilities-system-monitor");
+    icon.set_pixel_size(64);
+    icon.set_valign(gtk::Align::Center);
+    hero.append(&icon);
+    let hv = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    hv.set_valign(gtk::Align::Center);
+    hv.append(&label(&esc(nysm_core::brand::PRODUCT_NAME), &["mid-value"]));
+    hv.append(&label(
+        &format!(
+            "Version {} · MIT OR Apache-2.0 · runs as you, offline, no telemetry",
+            env!("CARGO_PKG_VERSION")
+        ),
+        &["dim-label", "caption"],
+    ));
+    hv.append(&label(
+        "See what this computer is doing, what changed in the last minutes, <i>which</i> \
+         process or container is responsible, and whether work is <i>waiting</i>. \
+         Values that cannot be measured show why, never a fake 0.",
+        &[],
+    ));
+    hero.append(&hv);
+    page.append(&hero);
+
+    // Right now.
+    let now = card("Right now");
+    let (grid, status) = stats::grid(&[
+        (
+            "Data comes from",
+            "The collector service samples once for every window and the top bar",
+        ),
+        (
+            "Top bar",
+            "nysm-tray; turn it on or off in Settings (Ctrl+,)",
+        ),
+        ("Sampling", "How often values are read from the kernel"),
+        (
+            "History kept",
+            "Shown in charts; change it in Settings (Ctrl+,)",
+        ),
+    ]);
+    now.append(&grid);
+    page.append(&now);
+
+    // Cost.
+    let cost = card("What it costs right now");
+    let (tgrid, totals) = stats::grid(&[
+        (
+            "CPU, all parts",
+            "Sum over the collector, the top bar and every open window",
+        ),
+        ("Memory, all parts", "Resident memory of those processes"),
+    ]);
+    cost.append(&tgrid);
+    let procs = gtk::Grid::new();
+    procs.set_column_spacing(24);
+    procs.set_row_spacing(4);
+    cost.append(&procs);
+    cost.append(&label(
+        "<small>CPU is a share of one core. Reference (Intel i5-7500): collector ~0.2 % and \
+         3 MiB, top bar 0.03–0.2 % and 5 MiB, a window ~2 % while visible and nothing while \
+         minimised; GNOME Shell spends ~1 % more to redraw the top bar. Pages you are not \
+         looking at are not updated.</small>",
+        &["dim-label"],
+    ));
+    page.append(&cost);
+
+    // Info cards, two per row.
+    let flow = gtk::FlowBox::new();
+    flow.set_selection_mode(gtk::SelectionMode::None);
+    flow.set_homogeneous(true);
+    flow.set_min_children_per_line(1);
+    flow.set_max_children_per_line(2);
+    flow.set_row_spacing(14);
+    flow.set_column_spacing(14);
+    let cfg = nysm_config::default_path().map_or("—".into(), |p| p.display().to_string());
+    let state = nysm_config::default_incident_dir()
+        .and_then(|p| p.parent().map(|d| d.display().to_string()))
+        .unwrap_or_else(|| "—".into());
+    let files = format!(
+        "Settings <tt>{}</tt>\nSaved data <tt>{}</tt>\nRuntime (cleared at logout) \
+         <tt>$XDG_RUNTIME_DIR/nysm</tt>\nUninstall <tt>~/.local/share/nysm/uninstall.sh</tt> \
+         (<tt>--purge</tt> also removes settings and saved data)",
+        esc(&cfg),
+        esc(&state)
+    );
+    for c in [
+        info_card(
+            "utilities-system-monitor-symbolic",
+            "How the numbers are collected",
+            "Read directly from the Linux kernel (<tt>/proc</tt>, <tt>/sys</tt>) as a normal \
+             user. Rates such as CPU % and bytes/s are the change between two samples. Other \
+             users' processes show \"permission denied\" where the kernel only answers their \
+             owner; nothing is guessed.",
+        ),
+        info_card(
+            "document-open-recent-symbolic",
+            "History",
+            "Recent history lives in memory in the collector, so charts fill in as soon as a \
+             window opens. It is lost when the collector stops. For days of data record to a \
+             file: <tt>nysm record -o day.nysm --duration 24h --interval 10s</tt>, then \
+             <tt>nysm compare day.nysm</tt>.",
+        ),
+        info_card(
+            "view-grid-symbolic",
+            "Top-bar labels",
+            "<b>CPU</b> usage of all cores · <b>RAM</b> memory in use · <b>↓ ↑</b> network \
+             download / upload · <b>Disk</b> storage used on <tt>/</tt> · <b>I/O</b> how busy \
+             the disk is · <b>R / W</b> disk read / write per second. Click the top bar for \
+             details and its Top bar menu.",
+        ),
+        info_card(
+            "security-high-symbolic",
+            "Privacy and safety",
+            "No network access unless you ask (<tt>nysm net check</tt>, remote over your own \
+             SSH). No accounts, no telemetry, never root. Command lines are hidden unless you \
+             ask, because they can hold passwords. Container names are opt-in: the Docker \
+             socket is root-equivalent. Its files are readable only by you.",
+        ),
+        info_card("folder-symbolic", "Files", &files),
+        info_card(
+            "text-x-generic-symbolic",
+            "Licence and help",
+            "MIT OR Apache-2.0, at your option. Third-party components and their licences: \
+             <tt>THIRD-PARTY-LICENSES.txt</tt>. User guide: <tt>docs/guide.md</tt>. Every \
+             command has <tt>--help</tt>; <tt>nysm doctor</tt> checks this machine.",
+        ),
+    ] {
+        flow.insert(&c, -1);
+    }
+    page.append(&flow);
+    About {
+        status,
+        totals,
+        procs,
+        history,
+        interval,
+    }
+}
+
 impl About {
     /// Refresh the live parts (called while the page is shown).
     pub fn update(&self, s: &Snapshot, attached: bool) {
         let trays = crate::trayctl::running().len();
-        self.running.set_markup(&format!(
-            "<small>Now: data from {} · top bar {} · this window collects {}.</small>",
-            if attached {
-                "the collector service"
+        let t = &self.status;
+        if attached {
+            t[0].set("Collector service", "shared by all windows and the top bar");
+        } else {
+            t[0].set("This window", "no collector service running");
+        }
+        t[1].set(
+            if trays > 0 { "Running" } else { "Off" },
+            if trays > 0 {
+                "nysm-tray"
             } else {
-                "this window (no collector service running)"
+                "turn it on in Settings"
             },
-            if trays > 0 { "running" } else { "not running" },
-            if attached {
-                "nothing itself"
-            } else {
-                "for itself"
-            }
-        ));
-        let Some(t) = &s.processes else {
+        );
+        t[2].set(
+            &format!("Every {}", human_span(self.interval)),
+            "processes every 2 s, disks every 15 s",
+        );
+        t[3].set(&human_span(self.history), "in memory");
+
+        let Some(table) = &s.processes else {
             return;
         };
         let cores = s.cpu.logical_cores.value.unwrap_or(1).max(1) as f64;
-        let mut rows = Vec::new();
-        let (mut cpu, mut rss) = (0.0, 0u64);
-        for p in &t.entries {
-            let role = match p.name.as_str() {
-                "nysm" => "collector / terminal",
-                "nysm-tray" => "top bar",
-                "nysm-desktop" => "window",
+        while let Some(c) = self.procs.first_child() {
+            self.procs.remove(&c);
+        }
+        let cell = |text: &str, col: i32, row: i32, xalign: f32, classes: &[&str]| {
+            let l = gtk::Label::new(Some(text));
+            l.set_xalign(xalign);
+            l.add_css_class("numeric");
+            for c in classes {
+                l.add_css_class(c);
+            }
+            self.procs.attach(&l, col, row, 1, 1);
+        };
+        for (i, h) in ["Part", "PID", "CPU (one core)", "Memory"]
+            .iter()
+            .enumerate()
+        {
+            let x = if i == 0 { 0.0 } else { 1.0 };
+            cell(h, i as i32, 0, x, &["dim-label", "caption"]);
+        }
+        let (mut cpu, mut rss, mut row) = (0.0, 0u64, 1);
+        for p in &table.entries {
+            let part = match p.name.as_str() {
+                "nysm" => "Collector / terminal",
+                "nysm-tray" => "Top bar",
+                "nysm-desktop" => "Window",
                 _ => continue,
             };
-            let c = p.cpu_pct.live().copied();
+            let c = p.cpu_pct.live().copied().map(|c| c * cores);
             cpu += c.unwrap_or(0.0);
             rss += p.rss_bytes;
-            rows.push(format!(
-                "{role} (PID {}): CPU {} ({} of one core) · memory {}",
-                p.id.pid,
-                c.map_or("—".into(), |c| format!("{c:.2}%")),
-                c.map_or("—".into(), |c| format!("{:.1}%", c * cores)),
-                units::bytes(p.rss_bytes as f64)
-            ));
+            cell(part, 0, row, 0.0, &[]);
+            cell(&p.id.pid.to_string(), 1, row, 1.0, &["dim-label"]);
+            cell(
+                &c.map_or("—".into(), |c| format!("{c:.1}%")),
+                2,
+                row,
+                1.0,
+                &[],
+            );
+            cell(&units::bytes(p.rss_bytes as f64), 3, row, 1.0, &[]);
+            row += 1;
         }
-        rows.push(format!(
-            "<b>Total: CPU {cpu:.2}% of all cores ({:.1}% of one core) · memory {}</b>",
-            cpu * cores,
-            units::bytes(rss as f64)
-        ));
-        self.cost.set_markup(&rows.join("\n"));
+        self.totals[0].set(&format!("{cpu:.1}%"), "of one core");
+        self.totals[1].set(&units::bytes(rss as f64), &format!("{} processes", row - 1));
     }
 }
