@@ -1,8 +1,9 @@
 # Install and uninstall
 
-Status: release tarball for Linux x86_64 built and its install/uninstall
-tested in a throwaway HOME on Ubuntu 24.04 (2026-10-06). No `.deb` yet.
-Not for public distribution until the licence is chosen (ADR 0008).
+Status: release tarball and split `.deb` packages for Linux x86_64. The
+per-user install is tested in a throwaway HOME and on the development machine
+(Ubuntu 24.04, 2026-10-06). Licensed MIT OR Apache-2.0; licence texts and the
+third-party notices are included in every package.
 
 ## Build the package
 ```sh
