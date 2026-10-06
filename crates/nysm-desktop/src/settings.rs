@@ -73,16 +73,6 @@ fn choices(s: &Settings) -> Vec<Choice> {
                 ("5 seconds", "5s", secs(5)),
             ],
         ),
-        duration_choice(
-            "sampling.history",
-            "Keep history for",
-            s.history,
-            &[
-                ("10 minutes", "10m", secs(600)),
-                ("30 minutes", "30m", secs(1800)),
-                ("1 hour", "1h", secs(3600)),
-            ],
-        ),
     ]
 }
 
@@ -115,7 +105,65 @@ pub fn open(parent: &gtk::ApplicationWindow, current: &Settings, attached: bool)
         grid.attach(&dd, 1, row as i32, 1, 1);
         dropdowns.push(dd);
     }
+    // History length: any number of minutes, with what it costs.
+    let row = choices.len() as i32;
+    let hl = gtk::Label::new(Some("Keep history for"));
+    hl.set_xalign(0.0);
+    let max_min = history_max_minutes(current.interval);
+    let orig_min = (current.history.as_secs_f64() / 60.0).round().max(1.0);
+    let spin = gtk::SpinButton::with_range(1.0, max_min.max(orig_min), 1.0);
+    spin.set_value(orig_min);
+    spin.set_digits(0);
+    let hb = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    hb.append(&spin);
+    hb.append(&gtk::Label::new(Some("minutes")));
+    hl.set_mnemonic_widget(Some(&spin));
+    grid.attach(&hl, 0, row, 1, 1);
+    grid.attach(&hb, 1, row, 1, 1);
     body.append(&grid);
+    let hist_note = gtk::Label::new(None);
+    hist_note.set_xalign(0.0);
+    hist_note.set_wrap(true);
+    hist_note.set_max_width_chars(52);
+    hist_note.add_css_class("dim-label");
+    hist_note.add_css_class("caption");
+    body.append(&hist_note);
+    {
+        // Interval as currently chosen in the dialog (custom values keep
+        // the configured one).
+        let interval_of = {
+            let (dd, opts, cur) = (
+                dropdowns[1].clone(),
+                choices[1]
+                    .options
+                    .iter()
+                    .map(|(_, v)| *v)
+                    .collect::<Vec<_>>(),
+                current.interval,
+            );
+            move || {
+                opts.get(dd.selected() as usize)
+                    .copied()
+                    .flatten()
+                    .and_then(nysm_core::units::parse_duration)
+                    .unwrap_or(cur)
+            }
+        };
+        let interval_of = std::rc::Rc::new(interval_of);
+        let update = {
+            let (note, spin, iv) = (hist_note.clone(), spin.clone(), interval_of.clone());
+            std::rc::Rc::new(move || {
+                let iv = iv();
+                note.set_text(&history_note(spin.value(), iv));
+                spin.set_range(1.0, history_max_minutes(iv));
+            })
+        };
+        update();
+        let u = update.clone();
+        spin.connect_value_changed(move |_| u());
+        let u = update.clone();
+        dropdowns[1].connect_selected_notify(move |_| u());
+    }
     body.append(&tray_section());
 
     let path = nysm_config::default_path();
@@ -170,7 +218,7 @@ pub fn open(parent: &gtk::ApplicationWindow, current: &Settings, attached: bool)
             status.set_text("No configuration location ($HOME is not set).");
             return;
         };
-        let values: Vec<(&str, &str)> = choices
+        let mut values: Vec<(&str, &str)> = choices
             .iter()
             .zip(&dropdowns)
             .filter(|(c, dd)| dd.selected() != c.selected)
@@ -181,6 +229,10 @@ pub fn open(parent: &gtk::ApplicationWindow, current: &Settings, attached: bool)
                     .map(|v| (c.key, v))
             })
             .collect();
+        let minutes = format!("{}m", spin.value() as u64);
+        if (spin.value() - orig_min).abs() >= 0.5 {
+            values.push(("sampling.history", &minutes));
+        }
         if values.is_empty() {
             status.set_text("Nothing changed.");
             return;
@@ -381,4 +433,36 @@ fn small_label(text: &str) -> gtk::Label {
     let l = gtk::Label::new(Some(text));
     l.set_xalign(0.0);
     l
+}
+
+/// Longest history (minutes) that fits the collector's memory bound at
+/// this sampling interval.
+fn history_max_minutes(interval: Duration) -> f64 {
+    (nysm_core::history::max_history_samples() as f64 * interval.as_secs_f64() / 60.0).floor()
+}
+
+/// What keeping `minutes` of history costs, with warnings and options.
+fn history_note(minutes: f64, interval: Duration) -> String {
+    let samples = (minutes * 60.0 / interval.as_secs_f64()).ceil() as usize;
+    let bytes = nysm_core::history::history_bytes(samples);
+    let mut t = format!(
+        "{samples} samples at {} each: about {} in the collector and the same in each open window. \
+         History lives in memory and starts again when the collector restarts.",
+        nysm_core::units::duration_s(interval.as_secs_f64()),
+        nysm_core::units::bytes(bytes as f64)
+    );
+    if minutes > 60.0 {
+        t.push_str(
+            " Longer history uses more memory and makes a window take a little longer to open \
+             (charts draw at most one point per pixel, so drawing stays cheap). For days or weeks \
+             of data, record to a file instead: nysm record -o FILE --duration 24h --interval 10s, then nysm compare FILE.",
+        );
+    }
+    if minutes >= history_max_minutes(interval) {
+        t.push_str(&format!(
+            " This is the most that fits ({} of memory); sample less often to keep longer.",
+            nysm_core::units::bytes(nysm_core::history::MAX_HISTORY_BYTES as f64)
+        ));
+    }
+    t
 }

@@ -90,6 +90,16 @@ now a virtualized GtkColumnView: every process is listed (no 200-row cap),
 only the visible rows have widgets, and a refresh updates their text in
 place, so scroll position and selection are kept.
 
+## History length
+Settings → *Keep history for* takes any number of minutes. Below it the app
+shows what that costs (samples, memory in the collector and in each open
+window), warns that longer history means more memory and a slightly slower
+window open, that history is lost when the collector restarts, and suggests
+`nysm record … --interval 10s` for days of data. History is bounded at 16 MiB
+(about 44 h at 1 s). The chart range menu offers ranges up to the kept
+history, plus "All kept"; long charts draw one point per pixel column (its
+peak), so drawing cost does not grow with history.
+
 ## Not yet done
 - libadwaita (`libadwaita-1-dev` is not installed on the dev machine;
   installing it needs administrator rights); screen-reader testing with

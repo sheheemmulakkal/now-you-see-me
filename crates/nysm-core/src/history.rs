@@ -105,6 +105,15 @@ impl History {
 mod tests {
     use super::*;
 
+    #[test]
+    fn configured_samples_are_all_kept() {
+        // Regression: a 64-byte budget per point (points are larger) kept
+        // only ~60 % of the configured history.
+        let h = History::new(600, history_bytes(600));
+        assert_eq!(h.capacity(), 600);
+        assert!(max_history_samples() >= 24 * 3600 + 1, "a day at 1 s fits");
+    }
+
     fn point(seq: u64) -> HistoryPoint {
         HistoryPoint {
             seq,
@@ -143,6 +152,22 @@ mod tests {
         assert_eq!(h.len(), 5);
         assert!(h.heap_bytes() <= size * 8);
     }
+}
+
+/// Upper bound on retained history: 16 MiB, about 44 h at a 1 s interval.
+pub const MAX_HISTORY_BYTES: usize = 16 << 20;
+
+/// Bytes needed to keep `samples` points (the real point size), capped at
+/// [`MAX_HISTORY_BYTES`]. Use with `History::new(samples, history_bytes(samples))`.
+pub fn history_bytes(samples: usize) -> usize {
+    samples
+        .saturating_mul(std::mem::size_of::<HistoryPoint>())
+        .min(MAX_HISTORY_BYTES)
+}
+
+/// Most points that fit in [`MAX_HISTORY_BYTES`].
+pub fn max_history_samples() -> usize {
+    MAX_HISTORY_BYTES / std::mem::size_of::<HistoryPoint>()
 }
 
 /// One sample of a pinned process.

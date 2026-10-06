@@ -63,11 +63,32 @@ const PAGES: [(&str, &str, &str); 7] = [
     ("processes", "Processes", "view-list-symbolic"),
 ];
 
-const RANGES: [(&str, f64); 3] = [
+/// Chart ranges offered (seconds); those longer than the kept history are
+/// left out, and the full history is always the last choice.
+const RANGES: [(&str, f64); 9] = [
     ("Last 1 minute", 60.0),
     ("Last 5 minutes", 300.0),
     ("Last 10 minutes", 600.0),
+    ("Last 30 minutes", 1800.0),
+    ("Last hour", 3600.0),
+    ("Last 3 hours", 10800.0),
+    ("Last 6 hours", 21600.0),
+    ("Last 12 hours", 43200.0),
+    ("Last 24 hours", 86400.0),
 ];
+
+fn ranges_for(history_s: f64) -> Vec<(String, f64)> {
+    let mut v: Vec<(String, f64)> = RANGES
+        .iter()
+        .filter(|(_, s)| *s < history_s - 1.0)
+        .map(|(l, s)| (l.to_string(), *s))
+        .collect();
+    v.push((
+        format!("All kept ({})", nysm_core::units::duration_s(history_s)),
+        history_s,
+    ));
+    v
+}
 
 struct Args {
     attach: Attach,
@@ -252,7 +273,7 @@ fn engine_config(s: &nysm_config::Settings) -> nysm_engine::EngineConfig {
         sensors: true,
         sensor_interval: std::time::Duration::from_secs(5),
         history_samples: samples,
-        history_bytes: (samples * 64).min(4 << 20),
+        history_bytes: nysm_core::history::history_bytes(samples),
     }
 }
 
@@ -384,8 +405,10 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
     let alert_badge = gtk::Label::new(None);
     alert_badge.add_css_class("alert-banner");
     alert_badge.set_visible(false);
-    let range = gtk::DropDown::from_strings(&RANGES.map(|(l, _)| l));
-    range.set_selected(1);
+    let ranges = Rc::new(ranges_for(settings.history.as_secs_f64()));
+    let labels: Vec<&str> = ranges.iter().map(|(l, _)| l.as_str()).collect();
+    let range = gtk::DropDown::from_strings(&labels);
+    range.set_selected(1.min(ranges.len() as u32 - 1));
     range.set_tooltip_text(Some("Time range shown in charts"));
     let theme_dd = gtk::DropDown::from_strings(&["System theme", "Light", "Dark"]);
     theme_dd.set_selected(match theme {
@@ -459,9 +482,9 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
     }));
     let ui = Rc::new(ui);
     {
-        let (state, ui) = (state.clone(), ui.clone());
+        let (state, ui, ranges) = (state.clone(), ui.clone(), ranges.clone());
         range.connect_selected_notify(move |dd| {
-            ui.set_window_s(RANGES.get(dd.selected() as usize).map_or(300.0, |r| r.1));
+            ui.set_window_s(ranges.get(dd.selected() as usize).map_or(300.0, |r| r.1));
             state.borrow_mut().last_seq = 0;
         });
     }

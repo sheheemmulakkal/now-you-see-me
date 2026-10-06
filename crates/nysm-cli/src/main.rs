@@ -456,8 +456,7 @@ impl Ctx {
             sensors: true,
             sensor_interval: std::time::Duration::from_secs(5),
             history_samples,
-            // Bound bytes too: roughly 64 bytes per point, at most 4 MiB.
-            history_bytes: (history_samples * 64).min(4 << 20),
+            history_bytes: nysm_core::history::history_bytes(history_samples),
         }
     }
 }

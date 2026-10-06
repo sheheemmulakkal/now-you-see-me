@@ -102,6 +102,13 @@ impl Chart {
 fn ago(s: f64) -> String {
     if s < 1.0 {
         "now".into()
+    } else if s >= 3600.0 {
+        let h = s / 3600.0;
+        if (h - h.round()).abs() < 0.05 {
+            format!("{:.0} h", h)
+        } else {
+            format!("{h:.1} h")
+        }
     } else if s >= 60.0 {
         let m = s / 60.0;
         if (m - m.round()).abs() < 0.05 {
@@ -182,8 +189,52 @@ fn draw(cr: &gtk::cairo::Context, w: f64, h: f64, d: &Data, widget: &gtk::Drawin
         let _ = cr.show_text("collecting…");
         return;
     }
+    // Long histories: one point per pixel column (its peak, so spikes stay
+    // visible) instead of drawing every sample.
+    let step = ((n as f64 / pw).ceil() as usize).max(1);
+    let (series, gaps, n) = if step > 1 {
+        let thin = |v: &[Option<f64>]| -> Vec<Option<f64>> {
+            // Align buckets to the newest sample so "now" stays exact.
+            let off = (step - v.len() % step) % step;
+            let mut out = Vec::with_capacity(v.len() / step + 1);
+            let mut i = 0usize;
+            while i < v.len() {
+                let end = (i + step - if i == 0 { off } else { 0 }).min(v.len());
+                let peak = v[i..end].iter().flatten().copied().reduce(f64::max);
+                out.push(peak);
+                i = end;
+            }
+            out
+        };
+        let series: Vec<Series> = d
+            .series
+            .iter()
+            .map(|s| Series {
+                color: s.color,
+                values: thin(&s.values),
+            })
+            .collect();
+        let n2 = series.iter().map(|s| s.values.len()).max().unwrap_or(0);
+        let gaps: Vec<usize> = d.gaps.iter().map(|g| g * n2 / n.max(1)).collect();
+        (series, gaps, n2)
+    } else {
+        (
+            d.series
+                .iter()
+                .map(|s| Series {
+                    color: s.color,
+                    values: s.values.clone(),
+                })
+                .collect(),
+            d.gaps.clone(),
+            n,
+        )
+    };
+    if n < 2 {
+        return;
+    }
     let x_of = |i: usize| left + pw * i as f64 / (n - 1) as f64;
-    for &g in &d.gaps {
+    for &g in &gaps {
         if g < n {
             cr.set_source_rgba(fr, fgc, fb, 0.25);
             cr.set_dash(&[2.0, 3.0], 0.0);
@@ -193,13 +244,13 @@ fn draw(cr: &gtk::cairo::Context, w: f64, h: f64, d: &Data, widget: &gtk::Drawin
             cr.set_dash(&[], 0.0);
         }
     }
-    for s in &d.series {
+    for s in &series {
         let off = n - s.values.len();
         // Split into contiguous runs so gaps break both fill and line.
         let mut runs: Vec<Vec<(f64, f64)>> = vec![Vec::new()];
         for (i, v) in s.values.iter().enumerate() {
             let idx = i + off;
-            if d.gaps.contains(&idx) && !runs.last().unwrap().is_empty() {
+            if gaps.contains(&idx) && !runs.last().unwrap().is_empty() {
                 runs.push(Vec::new());
             }
             match v {
@@ -239,10 +290,13 @@ fn draw(cr: &gtk::cairo::Context, w: f64, h: f64, d: &Data, widget: &gtk::Drawin
 
 /// Tick spacing giving at most ~6 labels over `span` seconds.
 fn tick_step(span: f64) -> f64 {
-    [5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0]
-        .into_iter()
-        .find(|s| span / s <= 6.0)
-        .unwrap_or(1200.0)
+    [
+        5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 1200.0, 1800.0, 3600.0, 7200.0, 10800.0,
+        21600.0,
+    ]
+    .into_iter()
+    .find(|s| span / s <= 6.0)
+    .unwrap_or(43200.0)
 }
 
 /// Like `nice_ceiling` but on a 1024-based scale.
@@ -302,5 +356,7 @@ mod tests {
         assert_eq!(ago(45.0), "45 s");
         assert_eq!(ago(300.0), "5 min");
         assert_eq!(ago(90.0), "1.5 min");
+        assert_eq!(ago(7200.0), "2 h");
+        assert_eq!(tick_step(86400.0), 21600.0);
     }
 }
