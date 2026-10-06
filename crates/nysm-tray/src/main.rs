@@ -136,10 +136,6 @@ struct NysmTray {
     rate: RateUnit,
     /// Show the text label next to the icon (Ayatana hosts, e.g. Ubuntu).
     show_label: bool,
-    /// Widest recent label (characters) and when it was last that wide:
-    /// labels are padded to it so items do not shrink and shift their
-    /// neighbours on every update; after `HOLD` it shrinks to fit.
-    widest: std::cell::Cell<(usize, Instant)>,
     quit: Arc<AtomicBool>,
     /// Set when the tray host comes back (e.g. after a screen lock), so the
     /// main loop can re-register all items in a stable order.
@@ -159,14 +155,43 @@ fn disk_busy(s: &Snapshot) -> Option<f64> {
 /// constant width in the panel font.
 const FIG: char = '\u{2007}';
 
-/// Right-pad with figure spaces to `width` characters.
-fn pad_right(s: &str, width: usize) -> String {
-    let mut out = s.to_string();
-    out.extend(std::iter::repeat_n(
-        FIG,
-        width.saturating_sub(s.chars().count()),
-    ));
-    out
+/// U+2008 PUNCTUATION SPACE: as wide as a period.
+const PUNCT: char = '\u{2008}';
+
+/// Filler that brings a number ("9.5", "10", "999", "5") up to the width
+/// of three digits and a period. Figure and punctuation spaces are by
+/// definition as wide as a digit and a period, and UI fonts have tabular
+/// digits, so every number then has the same pixel width.
+fn number_fill(num: &str) -> String {
+    let digits = num.chars().filter(char::is_ascii_digit).count();
+    let mut f: String = std::iter::repeat_n(FIG, 3usize.saturating_sub(digits)).collect();
+    if !num.contains('.') {
+        f.push(PUNCT);
+    }
+    f
+}
+
+/// Filler that makes a narrow unit letter as wide as "M" (K, B, k and b
+/// are about a period narrower in common UI fonts).
+fn unit_fill(unit: &str) -> String {
+    if matches!(unit, "K" | "B" | "k" | "b") {
+        PUNCT.to_string()
+    } else {
+        String::new()
+    }
+}
+
+/// Compact value and its filler: "64K" + spaces so that every value of
+/// this kind is equally wide. The filler is placed at the end of the item
+/// so values stay next to their icons.
+fn fixed(v: f64, base: f64, units: &[&str]) -> (String, String) {
+    let text = compact(v, base, units);
+    let unit_len = text
+        .trim_start_matches(|c: char| c.is_ascii_digit() || c == '.')
+        .len();
+    let (num, unit) = text.split_at(text.len() - unit_len);
+    let fill = number_fill(num) + &unit_fill(unit);
+    (text, fill)
 }
 
 /// Compact value for the top bar: at most three digits and a one-letter
@@ -188,18 +213,22 @@ fn compact(v: f64, base: f64, units: &[&str]) -> String {
     }
 }
 
-/// Bytes ("6.2G", "15G") for memory.
-fn short_bytes(n: f64) -> String {
-    compact(n, 1024.0, &["B", "K", "M", "G", "T"])
+fn fixed_bytes(n: f64) -> (String, String) {
+    fixed(n, 1024.0, &["B", "K", "M", "G", "T"])
 }
 
-/// Per-second rate without "/s" (the tooltip and menu spell it out):
-/// bytes with binary prefixes, or bits with decimal prefixes.
-fn short_rate(bytes_per_s: f64, unit: RateUnit) -> String {
+fn fixed_rate(bytes_per_s: f64, unit: RateUnit) -> (String, String) {
     match unit {
-        RateUnit::Bytes => compact(bytes_per_s, 1024.0, &["B", "K", "M", "G"]),
-        RateUnit::Bits => compact(bytes_per_s * 8.0, 1000.0, &["b", "k", "M", "G"]),
+        RateUnit::Bytes => fixed(bytes_per_s, 1024.0, &["B", "K", "M", "G"]),
+        RateUnit::Bits => fixed(bytes_per_s * 8.0, 1000.0, &["b", "k", "M", "G"]),
     }
+}
+
+/// "35%" plus filler to the width of "100%".
+fn fixed_pct(v: f64) -> (String, String) {
+    let n = format!("{:.0}", v.clamp(0.0, 100.0));
+    let fill = std::iter::repeat_n(FIG, 3usize.saturating_sub(n.len())).collect();
+    (format!("{n}%"), fill)
 }
 
 /// Menu labels treat `_` as a mnemonic marker; show it literally.
@@ -271,36 +300,47 @@ impl NysmTray {
         }
     }
 
+    /// Label text with its filler appended, so each item keeps exactly the
+    /// same width whatever the values (see `fixed`).
     fn value_text(&self, s: &Snapshot) -> String {
+        let dash = || ("—".to_string(), String::new());
         let cpu = s
             .cpu
             .usage
             .live()
-            .map_or("—".into(), |c| format!("{:.0}%", c.total_pct));
+            .map_or_else(dash, |c| fixed_pct(c.total_pct));
         let mem = s
             .memory
             .usage
             .live()
-            .map_or("—".to_string(), |m| short_bytes(m.used_bytes as f64));
+            .map_or_else(dash, |m| fixed_bytes(m.used_bytes as f64));
         let (rx, tx) = match s.network.total.live() {
             Some(n) => (
-                short_rate(n.rx_bytes_per_s, self.rate),
-                short_rate(n.tx_bytes_per_s, self.rate),
+                fixed_rate(n.rx_bytes_per_s, self.rate),
+                fixed_rate(n.tx_bytes_per_s, self.rate),
             ),
-            None => ("—".to_string(), "—".to_string()),
+            None => (dash(), dash()),
         };
         match self.item {
-            Item::Meter => format!("{cpu} · {mem} · ↓{rx} ↑{tx}"),
-            Item::Cpu => cpu,
-            Item::Memory => mem,
-            Item::Network => format!("↓{rx} ↑{tx}"),
-            Item::Disk => disk_busy(s).map_or("—".into(), |b| format!("{:.0}%", b.min(100.0))),
+            Item::Meter => format!(
+                "{}{} · {}{} · ↓{}{} ↑{}{}",
+                cpu.0, cpu.1, mem.0, mem.1, rx.0, rx.1, tx.0, tx.1
+            ),
+            Item::Cpu => cpu.0 + &cpu.1,
+            Item::Memory => mem.0 + &mem.1,
+            // Fill at the end: the item's width is constant; only the
+            // upload value may shift slightly inside it.
+            Item::Network => format!("↓{} ↑{}{}{}", rx.0, tx.0, rx.1, tx.1),
+            Item::Disk => {
+                let d = disk_busy(s).map_or_else(dash, |b| fixed_pct(b.min(100.0)));
+                d.0 + &d.1
+            }
             Item::DiskIo => match s.storage.total_io.live() {
-                Some(d) => format!(
-                    "R {} W {}",
-                    short_rate(d.read_bytes_per_s, RateUnit::Bytes),
-                    short_rate(d.write_bytes_per_s, RateUnit::Bytes)
-                ),
+                Some(d) => {
+                    let r = fixed_rate(d.read_bytes_per_s, RateUnit::Bytes);
+                    let w = fixed_rate(d.write_bytes_per_s, RateUnit::Bytes);
+                    format!("R {} W {}{}{}", r.0, w.0, r.1, w.1)
+                }
                 None => "R — W —".into(),
             },
         }
@@ -435,19 +475,7 @@ impl ksni::Tray for NysmTray {
         if !self.show_label {
             return String::new();
         }
-        const HOLD: Duration = Duration::from_secs(30);
-        let text = self.label_text();
-        let n = text.chars().count();
-        let (w, at) = self.widest.get();
-        let w = if n >= w || at.elapsed() >= HOLD {
-            self.widest.set((n, Instant::now()));
-            n
-        } else {
-            w
-        };
-        // Spare width goes after the text, so the value stays right next
-        // to its icon and only the gap to the next item varies.
-        pad_right(&text, w)
+        self.label_text()
     }
 
     fn label_guide(&self) -> String {
@@ -680,7 +708,6 @@ fn main() {
                 source: source_text.to_string(),
                 rate: settings.rate_unit,
                 show_label,
-                widest: std::cell::Cell::new((0, Instant::now())),
                 quit: quit.clone(),
                 host_back: host_back.clone(),
                 selection: selection.clone(),
@@ -831,22 +858,28 @@ fn main() {
 mod tests {
     use super::*;
 
-    fn w(s: &str) -> usize {
-        s.chars().count()
-    }
-
     #[test]
-    fn compact_values_are_short() {
-        for v in [
-            0.0, 5.0, 64.0, 999.0, 1000.0, 1536.0, 9.0e4, 1.2e6, 5.0e8, 3.0e9,
-        ] {
-            assert!(w(&short_rate(v, RateUnit::Bytes)) <= 4, "{v}");
-            assert!(w(&short_rate(v, RateUnit::Bits)) <= 4, "{v}");
+    fn values_have_constant_pixel_width() {
+        // Count digit-wide and period-wide slots of value + filler; the
+        // unit letter itself is M-wide (K/B/k/b carry a period filler).
+        let slots = |(t, f): (String, String)| {
+            let all = t + &f;
+            let digit = all
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == FIG)
+                .count();
+            let period = all.chars().filter(|c| *c == '.' || *c == PUNCT).count();
+            (digit, period)
+        };
+        for v in [0.0, 5.0, 64.0, 999.0, 1536.0, 9.0e4, 1.2e6, 5.0e8] {
+            let (t, f) = fixed_rate(v, RateUnit::Bytes);
+            let narrow_unit = !t.ends_with('M');
+            assert_eq!(slots((t, f)), (3, 1 + narrow_unit as usize), "{v}");
         }
-        assert_eq!(short_rate(1536.0, RateUnit::Bytes), "1.5K");
-        assert_eq!(short_rate(64.0 * 1024.0, RateUnit::Bytes), "64K");
-        assert_eq!(short_rate(1000.0 * 1024.0, RateUnit::Bytes), "1.0M");
-        assert_eq!(short_bytes(9.6 * 1024.0 * 1024.0 * 1024.0), "9.6G");
-        assert_eq!(pad_right("5", 3), "5\u{2007}\u{2007}");
+        assert_eq!(fixed_rate(1536.0, RateUnit::Bytes).0, "1.5K");
+        assert_eq!(fixed_rate(64.0 * 1024.0, RateUnit::Bytes).0, "64K");
+        assert_eq!(fixed_bytes(9.6 * 1024.0 * 1024.0 * 1024.0).0, "9.6G");
+        assert_eq!(slots(fixed_pct(5.0)), (3, 0));
+        assert_eq!(slots(fixed_pct(100.0)), (3, 0));
     }
 }

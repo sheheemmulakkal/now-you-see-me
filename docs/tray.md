@@ -23,8 +23,12 @@ cp packaging/linux/nysm-tray.desktop ~/.config/autostart/
   its value next to it — CPU `24%`, memory `6.2G`, network `↓1.8M ↑240K`,
   disk activity `12%` (busiest disk), optionally disk read/write `R1.2M W340K`.
   Values are compact (bytes per second, binary prefixes; bits with
-  `--rate-unit bits`), and each item holds its widest width for 30 s before
-  shrinking, so neighbours do not jump on every update. A `⚠` appears before the first value while an
+  `--rate-unit bits`) and every item keeps exactly the same width: numbers are
+  filled to three digits and a period with figure/punctuation spaces (as wide
+  as a digit and a period by definition; UI fonts have tabular digits), and
+  narrow units (K, B) get a period-wide filler to match M. The filler goes at
+  the end of the item, so values stay next to their icons. Measured on Ubuntu
+  24.04: icon positions moved 0 px over 30 s. A `⚠` appears before the first value while an
   alert fires. The icons are symbolic, so the panel recolours them.
 - **Choose what to show**: menu → *Show in top bar* → CPU usage, Memory used,
   Network download / upload, Disk activity (%), Disk read / write. At least
