@@ -13,25 +13,38 @@ tray; there, use the optional GNOME extension or `nysm-desktop`.
 
 ```sh
 cargo build --release -p nysm-tray
-./target/release/nysm-tray [--attach auto|never|require]
+./target/release/nysm-tray [--attach auto|never|require] [--items cpu,mem,net,disk] [--meter] [--no-label]
 # opt-in autostart:
 cp packaging/linux/nysm-tray.desktop ~/.config/autostart/
 ```
 
 ## What it shows
-- **Icon**: a live meter, two bars — CPU (blue) and memory used (purple).
-  Grey when stale or not yet collected; missing values are an empty
-  track, never a zero level; red corner while an alert is firing.
+- **Top bar (default)**: one item per metric, each a symbolic icon with
+  its value next to it — CPU `24%`, memory `6.2G`, network
+  `↓1.8 MiB/s ↑240 KiB/s`, disk `R 12 MiB/s W 3 MiB/s`. Choose and order them
+  with `--items cpu,mem,net,disk`. A `⚠` appears before the first value while
+  an alert fires. The icons are symbolic, so the panel recolours them to its
+  text colour.
+- **`--meter`**: a single item instead: a live two-bar icon (CPU blue,
+  memory purple; grey when stale, red corner on alerts) followed by
+  `24% · 6.2G · ↓1.8 MiB/s ↑240 KiB/s`.
+- **`--no-label`**: icons only (for hosts or users that want no text).
 - **Tooltip**: CPU, memory, network.
 - **Menu**: CPU (with core count), memory (used/total/available), network
   ↓/↑, disk read/write, load and pressure (cpu/mem/io), firing alerts,
   data source, *Open monitor* (also on left click), *Quit*.
 
-## Why no text in the bar
-Ubuntu's indicator host can show a text label (`XAyatanaLabel`), but it
-is an Ayatana extension that `ksni` does not implement and that KDE and
-others ignore. The portable meter icon was chosen instead; the label is a
-possible Ubuntu-only enhancement later.
+## Text in the bar
+The values next to the icons use the Ayatana label extension
+(`XAyatanaLabel`), which Ubuntu's AppIndicator host shows. Upstream `ksni`
+does not implement it, so the workspace uses a vendored ksni 0.3.6 with that
+one addition (`vendor/ksni/PATCHED.md`). Hosts without the extension (KDE,
+XFCE) ignore it and show the icons only, with values in the tooltip and menu.
+Verified on Ubuntu 24.04 GNOME 46 (X11).
+
+The tray waits for a tray host instead of exiting: at login it may start
+before the panel, and GNOME removes the host while the screen is locked. Items
+re-register when the host returns.
 
 ## Data and cost
 If no service is running the tray collects totals itself, and every 30 s
