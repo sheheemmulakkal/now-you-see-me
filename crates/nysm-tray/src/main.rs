@@ -884,8 +884,15 @@ fn open_monitor() {
     let cmd = sibling
         .filter(|p| p.exists())
         .map_or_else(|| "nysm-desktop".into(), |p| p.into_os_string());
-    if let Err(e) = std::process::Command::new(&cmd).spawn() {
-        eprintln!("nysm-tray: cannot start {}: {e}", cmd.to_string_lossy());
+    match std::process::Command::new(&cmd).spawn() {
+        // Reap the window when it closes, so it never lingers as a zombie
+        // child of the tray.
+        Ok(mut child) => {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+        }
+        Err(e) => eprintln!("nysm-tray: cannot start {}: {e}", cmd.to_string_lossy()),
     }
 }
 

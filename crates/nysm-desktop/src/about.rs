@@ -267,6 +267,9 @@ impl About {
         }
         let (mut cpu, mut rss, mut row) = (0.0, 0u64, 1);
         for p in &table.entries {
+            if p.state == 'Z' {
+                continue; // exited, not yet reaped by its parent
+            }
             let part = match p.name.as_str() {
                 "nysm" => "Collector / terminal",
                 "nysm-tray" => "Top bar",
