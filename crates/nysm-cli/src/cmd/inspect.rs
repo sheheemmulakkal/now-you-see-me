@@ -45,6 +45,10 @@ struct Output<'a> {
     cwd: Field<String>,
     cgroup: Field<String>,
     open_fds: Field<u32>,
+    /// Soft open-files limit; null value with status when unknown.
+    /// `18446744073709551615` (u64::MAX) means unlimited.
+    fd_limit: Field<u64>,
+    swap_bytes: Field<u64>,
     /// Service/container/app the process belongs to (from its cgroup).
     #[serde(skip_serializing_if = "Option::is_none")]
     belongs_to: Option<BelongsTo>,
@@ -140,6 +144,8 @@ pub fn run(ctx: &Ctx, pid: u32, show_args: bool, json: bool, warmup: Duration) -
         cwd: field(d.cwd),
         cgroup: field(d.cgroup),
         open_fds: field(d.open_fds),
+        fd_limit: field(d.fd_limit),
+        swap_bytes: field(d.swap_bytes),
         belongs_to,
         sockets: field(sockets),
         cmdline: d.cmdline.map(field),
@@ -310,9 +316,19 @@ pub fn run(ctx: &Ctx, pid: u32, show_args: bool, json: bool, warmup: Duration) -
     row(
         &mut out,
         "open fds",
-        match &o.open_fds.value {
-            Some(n) => n.to_string(),
-            None => st.dim(&format!("— ({})", o.open_fds.status.label())),
+        match (&o.open_fds.value, &o.fd_limit.value) {
+            (Some(n), Some(u64::MAX)) => format!("{n} (no limit)"),
+            (Some(n), Some(l)) => format!("{n} of {l} allowed"),
+            (Some(n), None) => n.to_string(),
+            (None, _) => st.dim(&format!("— ({})", o.open_fds.status.label())),
+        },
+    )?;
+    row(
+        &mut out,
+        "swap used",
+        match &o.swap_bytes.value {
+            Some(b) => units::bytes(*b as f64),
+            None => st.dim(&format!("— ({})", o.swap_bytes.status.label())),
         },
     )?;
     match &o.cmdline {

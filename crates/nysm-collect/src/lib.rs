@@ -47,6 +47,10 @@ pub struct ProcessDetails {
     pub cmdline: Option<CResult<Vec<String>>>,
     pub cgroup: CResult<String>,
     pub open_fds: CResult<u32>,
+    /// Soft limit on open files (`ulimit -n`); `u64::MAX` = unlimited.
+    pub fd_limit: CResult<u64>,
+    /// Memory of this process currently in swap (`VmSwap`).
+    pub swap_bytes: CResult<u64>,
 }
 
 /// A platform's measurement surface. One instance is owned by one engine;

@@ -230,6 +230,8 @@ impl RemoteLive {
                                             cmdline: None,
                                             cgroup: w.cgroup.into(),
                                             open_fds: w.open_fds.into(),
+                                            fd_limit: w.fd_limit.into(),
+                                            swap_bytes: w.swap_bytes.into(),
                                         }),
                                         Err(m) => Err(if m.contains("no longer exists") {
                                             CollectError::Gone

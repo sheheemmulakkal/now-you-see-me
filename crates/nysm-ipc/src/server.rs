@@ -474,6 +474,8 @@ fn serve_conn(
                                     cwd: d.cwd.into(),
                                     cgroup: d.cgroup.into(),
                                     open_fds: d.open_fds.into(),
+                                    fd_limit: d.fd_limit.into(),
+                                    swap_bytes: d.swap_bytes.into(),
                                 }),
                                 Some(Err(e)) => Err(e.to_string()),
                                 None => Err("collector busy".into()),

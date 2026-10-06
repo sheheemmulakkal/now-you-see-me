@@ -132,3 +132,98 @@ impl CoreTile {
         ));
     }
 }
+
+/// A watched (pinned) process: name, live CPU and memory with history.
+pub struct WatchTile {
+    pub root: gtk::Box,
+    title: gtk::Label,
+    status: gtk::Label,
+    cpu: Chart,
+    mem: Chart,
+    pub stop: gtk::Button,
+}
+
+impl WatchTile {
+    pub fn new() -> Self {
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        root.add_css_class("stat");
+        root.set_width_request(260);
+        let top = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let title = small("", &["caption"]);
+        title.set_hexpand(true);
+        let stop = gtk::Button::from_icon_name("window-close-symbolic");
+        stop.add_css_class("flat");
+        stop.set_tooltip_text(Some("Stop watching"));
+        top.append(&title);
+        top.append(&stop);
+        let status = small("", &["numeric"]);
+        let cpu_l = small("CPU, % of all cores", &["caption", "dim-label"]);
+        let cpu = Chart::mini(36, None, |v| format!("{v:.1}%"));
+        let mem_l = small("Memory (RSS)", &["caption", "dim-label"]);
+        let mem = Chart::mini(36, None, bytes);
+        root.append(&top);
+        root.append(&status);
+        root.append(&cpu_l);
+        root.append(&cpu.area);
+        root.append(&mem_l);
+        root.append(&mem.area);
+        WatchTile {
+            root,
+            title,
+            status,
+            cpu,
+            mem,
+            stop,
+        }
+    }
+
+    pub fn show(&self, p: &nysm_core::history::PinnedProcess) {
+        self.title.set_text(&format!(
+            "{} · PID {}",
+            nysm_core::sanitize::for_terminal(&p.name),
+            p.id.pid
+        ));
+        let last = p.points.back();
+        let status = match (p.exited, last) {
+            (true, _) => "exited — history kept until you stop watching".to_string(),
+            (false, Some(pt)) => format!(
+                "CPU {} · memory {}",
+                pt.cpu_pct.map_or("—".into(), |c| format!("{c:.1}%")),
+                bytes(pt.rss_bytes as f64)
+            ),
+            (false, None) => "collecting…".into(),
+        };
+        self.status.set_text(&status);
+        if p.exited {
+            self.root.add_css_class("dim-label");
+        }
+        let span = match (p.points.front(), last) {
+            (Some(a), Some(b)) => (b.timestamp_ms - a.timestamp_ms) as f64 / 1000.0,
+            _ => 0.0,
+        };
+        self.cpu.set(
+            vec![Series {
+                color: chart::CPU,
+                values: p.points.iter().map(|x| x.cpu_pct.map(f64::from)).collect(),
+            }],
+            Vec::new(),
+            span,
+        );
+        self.mem.set(
+            vec![Series {
+                color: chart::MEM,
+                values: p.points.iter().map(|x| Some(x.rss_bytes as f64)).collect(),
+            }],
+            Vec::new(),
+            span,
+        );
+        self.cpu
+            .set_summary(&format!("CPU history of PID {}", p.id.pid));
+        self.mem
+            .set_summary(&format!("Memory history of PID {}", p.id.pid));
+    }
+}
+
+fn bytes(v: f64) -> String {
+    nysm_core::units::bytes(v)
+}

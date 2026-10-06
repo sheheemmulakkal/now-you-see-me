@@ -68,7 +68,8 @@ Screen-reader (Orca) testing has not been done.
 | Alt+1 … Alt+7 | Overview, Processes, CPU, Memory, Network, Storage, Containers & services (numbered like the TUI's views 1–7) |
 | Ctrl+F | Processes page, focus the filter |
 | typing on the Processes page | starts filtering |
-| Enter / double-click on a process | details |
+| click / arrow keys on a process | live details (refreshed every second) |
+| Ctrl/Shift-click, then **Watch** | watch up to 8 processes: CPU and memory charts since watching started |
 | Ctrl+, | Settings (network unit, sample interval, history; saved to the config file) |
 | Ctrl+W, Ctrl+Q | close the window |
 

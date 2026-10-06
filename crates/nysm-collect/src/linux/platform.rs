@@ -553,12 +553,22 @@ impl Platform for LinuxPlatform {
                 .map(|d| d.count() as u32)
                 .map_err(|e| CollectError::from_io(&path, &e))
         };
+        let read_parsed = |file: &str, f: fn(&str) -> Option<u64>, what: &str| {
+            let path = format!("{base}/{file}");
+            fs::read_to_string(&path)
+                .map_err(|e| CollectError::from_io(&path, &e))
+                .and_then(|t| {
+                    f(&t).ok_or_else(|| CollectError::Unsupported(format!("no {what} in {path}")))
+                })
+        };
         Ok(ProcessDetails {
             exe: link("exe"),
             cwd: link("cwd"),
             cmdline,
             cgroup,
             open_fds,
+            fd_limit: read_parsed("limits", parse::limits_open_files, "open-files limit"),
+            swap_bytes: read_parsed("status", parse::status_vm_swap, "VmSwap"),
         })
     }
 

@@ -35,6 +35,7 @@ pub struct ProcTable {
     pub view: gtk::ColumnView,
     /// Placeholder items; only the count matters, text comes from `cells`.
     model: gtk::StringList,
+    selection: gtk::MultiSelection,
     cells: Rc<RefCell<Vec<Cells>>>,
     bound: Rc<RefCell<Bound>>,
 }
@@ -42,10 +43,9 @@ pub struct ProcTable {
 impl ProcTable {
     pub fn new() -> Self {
         let model = gtk::StringList::new(&[]);
-        let selection = gtk::SingleSelection::new(Some(model.clone()));
-        selection.set_autoselect(false);
-        selection.set_can_unselect(true);
-        let view = gtk::ColumnView::new(Some(selection));
+        // Several rows can be selected (Ctrl/Shift-click) to watch them.
+        let selection = gtk::MultiSelection::new(Some(model.clone()));
+        let view = gtk::ColumnView::new(Some(selection.clone()));
         view.set_reorderable(false);
         view.set_show_row_separators(true);
         view.add_css_class("proc-table");
@@ -88,6 +88,7 @@ impl ProcTable {
         ProcTable {
             view,
             model,
+            selection,
             cells,
             bound,
         }
@@ -118,6 +119,33 @@ impl ProcTable {
             }
             true
         });
+    }
+
+    /// Indices of the selected rows.
+    pub fn selected_rows(&self) -> Vec<usize> {
+        let set = self.selection.selection();
+        (0..set.size())
+            .map(|i| set.nth(i as u32) as usize)
+            .collect()
+    }
+
+    /// Select exactly these rows.
+    pub fn select_rows(&self, rows: &[usize]) {
+        self.selection.unselect_all();
+        for &r in rows {
+            self.selection.select_item(r as u32, false);
+        }
+    }
+
+    /// Clear the selection (rows are re-sorted on every refresh, so a
+    /// selection is only meaningful until it has been acted on).
+    pub fn unselect_all(&self) {
+        self.selection.unselect_all();
+    }
+
+    pub fn connect_selection_changed(&self, f: impl Fn(usize) + 'static) {
+        self.selection
+            .connect_selection_changed(move |sel, _, _| f(sel.selection().size() as usize));
     }
 
     /// Called with the row index on double-click or Enter.

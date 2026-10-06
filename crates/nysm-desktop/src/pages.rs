@@ -20,7 +20,7 @@ use nysm_core::{Reading, Status};
 
 use crate::chart::{self, Chart, Series};
 use crate::proctable::{self, ProcTable};
-use crate::stats::{self, CoreTile, Tile};
+use crate::stats::{self, CoreTile, Tile, WatchTile};
 
 /// Cap for the (non-virtualized) group list.
 const MAX_LIST_ROWS: usize = 200;
@@ -135,6 +135,20 @@ fn psi_tile(r: &Reading<Pressure>) -> (String, String) {
     }
 }
 
+/// Kernel process state letter in words.
+fn state_name(c: char) -> &'static str {
+    match c {
+        'R' => "running",
+        'S' => "sleeping",
+        'D' => "waiting on I/O (uninterruptible)",
+        'Z' => "zombie (exited, not yet reaped)",
+        'T' | 't' => "stopped",
+        'I' => "idle kernel thread",
+        'X' => "dead",
+        _ => "unknown",
+    }
+}
+
 fn pct(v: f64) -> String {
     format!("{v:.0}%")
 }
@@ -210,11 +224,22 @@ fn legend(header: &gtk::Box, name: &str, dot_class: &str) -> gtk::Label {
     v
 }
 
+/// (pid, start ticks, name) of each table row, in display order.
+type RowIds = Vec<(u32, u64, String)>;
+
 struct ProcState {
     last: Option<Arc<Snapshot>>,
-    rows: Vec<(u32, u64)>,
+    rows: RowIds,
     rendered_ts: Option<i64>,
+    /// Process shown in the details panel, refreshed while visible.
+    details_for: Option<(u32, u64)>,
+    details_at: Option<std::time::Instant>,
 }
+
+/// Most processes that can be watched at once (engine limit).
+const MAX_WATCHED: usize = nysm_core::history::ProcessHistory::DEFAULT_MAX_PINS;
+
+type WatchCallback = Rc<RefCell<Option<Box<dyn Fn(nysm_core::raw::ProcessId, Option<String>)>>>>;
 
 pub struct Pages {
     rate: RateUnit,
@@ -249,6 +274,14 @@ pub struct Pages {
     proc_count: gtk::Label,
     proc_table: ProcTable,
     proc_details: gtk::Label,
+    watch_btn: gtk::Button,
+    watch_card: gtk::Box,
+    watch_title: gtk::Label,
+    watch_box: gtk::FlowBox,
+    watch_tiles: RefCell<Vec<(nysm_core::raw::ProcessId, WatchTile)>>,
+    /// Called with (id, Some(name)) to watch, (id, None) to stop.
+    watch_cb: WatchCallback,
+    watched_count: Rc<Cell<usize>>,
     proc_state: Rc<RefCell<ProcState>>,
     details_cb: DetailsCallback,
     // CPU
@@ -375,13 +408,41 @@ impl Pages {
         proc_count.set_wrap(false);
         proc_count.set_ellipsize(gtk::pango::EllipsizeMode::End);
         proc_count.set_max_width_chars(28);
+        let watch_btn = gtk::Button::with_label("Watch");
+        watch_btn.set_sensitive(false);
+        watch_btn.set_tooltip_text(Some(
+            "Keep CPU and memory history for the selected processes (Ctrl/Shift-click to select several; up to 8)",
+        ));
         bar.append(&proc_search);
         bar.append(&proc_sort);
+        bar.append(&watch_btn);
         bar.append(&proc_count);
         pp.append(&bar);
+        let (watch_card, watch_header) = card("");
+        let watch_title = label("", &["card-title"]);
+        watch_title.set_hexpand(true);
+        watch_header.prepend(&watch_title);
+        watch_card.prepend(&watch_header);
+        let watch_box = gtk::FlowBox::new();
+        watch_box.set_selection_mode(gtk::SelectionMode::None);
+        watch_box.set_homogeneous(true);
+        watch_box.set_max_children_per_line(4);
+        watch_box.set_row_spacing(8);
+        watch_box.set_column_spacing(8);
+        watch_card.append(&watch_box);
+        watch_card.set_visible(false);
+        pp.append(&watch_card);
         let (list_card, _) = card("");
-        let split = gtk::Box::new(gtk::Orientation::Horizontal, 14);
+        // Table | details, with a draggable divider. The details side starts
+        // at DETAILS_W and keeps that width when the window is resized.
+        const DETAILS_W: i32 = 340;
+        let split = gtk::Paned::new(gtk::Orientation::Horizontal);
         split.set_vexpand(true);
+        split.set_wide_handle(true);
+        split.set_resize_start_child(true);
+        split.set_resize_end_child(false);
+        split.set_shrink_start_child(false);
+        split.set_shrink_end_child(false);
         let proc_table = ProcTable::new();
         // Its own scroller keeps the view virtualized (only visible rows
         // get widgets) and fills the page height.
@@ -390,16 +451,40 @@ impl Pages {
         proc_scroll.set_hexpand(true);
         proc_scroll.set_vexpand(true);
         proc_scroll.set_min_content_height(360);
+        // Ask for the columns' full width so the details panel cannot take it.
+        proc_scroll.set_propagate_natural_width(true);
         list_card.append(&proc_scroll);
-        split.append(&list_card);
+        split.set_start_child(Some(&list_card));
         let (details_card, _) = card("Details");
         details_card.set_hexpand(false);
-        details_card.set_width_request(280);
         details_card.set_valign(gtk::Align::Start);
-        let proc_details = label("Select a process (double-click or Enter).", &["dim-label"]);
+        let proc_details = label("Select a process to see its live details.", &["dim-label"]);
         proc_details.set_selectable(true);
-        details_card.append(&proc_details);
-        split.append(&details_card);
+        // Fixed width so long paths wrap instead of squeezing the table.
+        proc_details.set_max_width_chars(34);
+        proc_details.set_width_chars(34);
+        proc_details.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        // Cap the panel's width: long paths wrap inside it.
+        let details_scroll = gtk::ScrolledWindow::new();
+        details_scroll.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
+        details_scroll.set_propagate_natural_width(true);
+        details_scroll.set_propagate_natural_height(true);
+        details_scroll.set_max_content_width(320);
+        details_scroll.set_child(Some(&proc_details));
+        details_card.append(&details_scroll);
+        details_card.set_margin_start(8);
+        split.set_end_child(Some(&details_card));
+        {
+            // Place the divider once the page has a width; afterwards the
+            // user's position is kept (end child does not resize).
+            let placed = Cell::new(false);
+            split.connect_max_position_notify(move |p| {
+                if !placed.get() && p.max_position() > DETAILS_W * 2 {
+                    placed.set(true);
+                    p.set_position(p.max_position() - DETAILS_W);
+                }
+            });
+        }
         pp.append(&split);
         // Typing anywhere on the page starts filtering; focus moves into
         // the table when the page opens so key presses reach the page.
@@ -604,10 +689,19 @@ impl Pages {
             proc_count,
             proc_table,
             proc_details,
+            watch_btn,
+            watch_card,
+            watch_title,
+            watch_box,
+            watch_tiles: RefCell::new(Vec::new()),
+            watch_cb: Rc::default(),
+            watched_count: Rc::default(),
             proc_state: Rc::new(RefCell::new(ProcState {
                 last: None,
                 rows: Vec::new(),
                 rendered_ts: None,
+                details_for: None,
+                details_at: None,
             })),
             details_cb: Rc::new(RefCell::new(None)),
             cpu_stats,
@@ -646,12 +740,14 @@ impl Pages {
             Rc::new(move || {
                 let snap = st.borrow().last.clone();
                 if let Some(s) = snap {
+                    let prev = std::mem::take(&mut st.borrow_mut().rows);
                     let rows = render_processes(
                         &s,
                         &list,
                         &count,
                         &search.text(),
                         sort_key(sort.selected()),
+                        &prev,
                     );
                     st.borrow_mut().rows = rows;
                 }
@@ -667,14 +763,137 @@ impl Pages {
             self.proc_details.clone(),
         );
         self.proc_table.connect_activate(move |idx| {
-            let Some((pid, start)) = st.borrow().rows.get(idx).copied() else {
+            let Some((pid, start)) = st.borrow().rows.get(idx).map(|r| (r.0, r.1)) else {
                 return;
             };
             details.set_text(&format!("Loading details for PID {pid}…"));
+            {
+                let mut s = st.borrow_mut();
+                s.details_for = Some((pid, start));
+                s.details_at = Some(std::time::Instant::now());
+            }
             if let Some(f) = cb.borrow().as_ref() {
                 f(pid, start);
             }
         });
+        let (btn, st, table, cb, details) = (
+            self.watch_btn.clone(),
+            self.proc_state.clone(),
+            self.proc_table.clone(),
+            self.details_cb.clone(),
+            self.proc_details.clone(),
+        );
+        self.proc_table.connect_selection_changed(move |n| {
+            btn.set_sensitive(n > 0);
+            // A single selected process is shown in the details panel.
+            let rows = table.selected_rows();
+            if rows.len() != 1 {
+                return;
+            }
+            let Some((pid, start)) = st.borrow().rows.get(rows[0]).map(|r| (r.0, r.1)) else {
+                return;
+            };
+            if st.borrow().details_for == Some((pid, start)) {
+                return; // same process (selection restored after a refresh)
+            }
+            details.set_text(&format!("Loading details for PID {pid}…"));
+            {
+                let mut s = st.borrow_mut();
+                s.details_for = Some((pid, start));
+                s.details_at = Some(std::time::Instant::now());
+            }
+            if let Some(f) = cb.borrow().as_ref() {
+                f(pid, start);
+            }
+        });
+        let (st, table, cb) = (
+            self.proc_state.clone(),
+            self.proc_table.clone(),
+            self.watch_cb.clone(),
+        );
+        let watched = self.watch_tiles_count();
+        self.watch_btn.connect_clicked(move |_| {
+            let rows = st.borrow().rows.clone();
+            let free = MAX_WATCHED.saturating_sub(watched.get());
+            for i in table.selected_rows().into_iter().take(free) {
+                if let Some((pid, start, name)) = rows.get(i)
+                    && let Some(f) = cb.borrow().as_ref()
+                {
+                    f(
+                        nysm_core::raw::ProcessId {
+                            pid: *pid,
+                            start_ticks: *start,
+                        },
+                        Some(name.clone()),
+                    );
+                }
+            }
+            table.unselect_all();
+        });
+    }
+
+    /// Shared count of watched processes, for the Watch button's limit.
+    fn watch_tiles_count(&self) -> Rc<Cell<usize>> {
+        self.watched_count.clone()
+    }
+
+    pub fn on_watch_changed(
+        &self,
+        f: impl Fn(nysm_core::raw::ProcessId, Option<String>) + 'static,
+    ) {
+        *self.watch_cb.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// The process whose details should be refreshed now (every second
+    /// while the Processes page is shown), if any.
+    pub fn details_due(&self) -> Option<(u32, u64)> {
+        if self.visible_page() != "processes" {
+            return None;
+        }
+        let mut st = self.proc_state.borrow_mut();
+        let id = st.details_for?;
+        if st
+            .details_at
+            .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1))
+        {
+            return None;
+        }
+        st.details_at = Some(std::time::Instant::now());
+        Some(id)
+    }
+
+    /// Show the watched (pinned) processes; tiles are rebuilt only when the
+    /// set changes.
+    fn update_watch(&self, pinned: &[nysm_core::history::PinnedProcess]) {
+        self.watched_count.set(pinned.len());
+        self.watch_card.set_visible(!pinned.is_empty());
+        self.watch_title.set_text(&format!(
+            "Watching {} of {MAX_WATCHED} — CPU and memory since watching started",
+            pinned.len()
+        ));
+        let mut tiles = self.watch_tiles.borrow_mut();
+        let same =
+            tiles.len() == pinned.len() && tiles.iter().zip(pinned).all(|((id, _), p)| *id == p.id);
+        if !same {
+            while let Some(c) = self.watch_box.first_child() {
+                self.watch_box.remove(&c);
+            }
+            tiles.clear();
+            for p in pinned {
+                let t = WatchTile::new();
+                let (cb, id) = (self.watch_cb.clone(), p.id.clone());
+                t.stop.connect_clicked(move |_| {
+                    if let Some(f) = cb.borrow().as_ref() {
+                        f(id.clone(), None);
+                    }
+                });
+                self.watch_box.insert(&t.root, -1);
+                tiles.push((p.id.clone(), t));
+            }
+        }
+        for ((_, t), p) in tiles.iter().zip(pinned) {
+            t.show(p);
+        }
     }
 
     pub fn on_details_requested(&self, f: impl Fn(u32, u64) + 'static) {
@@ -682,32 +901,154 @@ impl Pages {
     }
 
     pub fn show_details(&self, r: nysm_collect::CResult<nysm_collect::ProcessDetails>) {
+        use gtk::glib::markup_escape_text as esc;
+        let reason = |e: &nysm_collect::CollectError| format!("— ({})", e.status().label());
         let show = |x: &nysm_collect::CResult<String>| match x {
             Ok(v) => safe(v),
-            Err(e) => format!("— ({})", e.status().label()),
+            Err(e) => reason(e),
         };
-        let text = match r {
-            Ok(d) => format!(
-                "Belongs to\n{}\n\nExecutable\n{}\n\nWorking directory\n{}\n\nCgroup\n{}\n\nOpen file descriptors\n{}\n\nCommand line is hidden by default (nysm inspect --show-args).",
-                d.cgroup
-                    .as_ref()
-                    .ok()
-                    .filter(|c| !c.is_empty() && c.as_str() != "/")
-                    .map_or("—".to_string(), |c| {
-                        let (k, n) =
-                            nysm_collect::linux::parse::cgroup_classify(c.trim_start_matches('/'));
-                        format!("{} {}", k.label(), safe(&n))
-                    }),
-                show(&d.exe),
-                show(&d.cwd),
-                show(&d.cgroup),
-                d.open_fds
-                    .as_ref()
-                    .map_or_else(|e| format!("— ({})", e.status().label()), |n| n.to_string())
-            ),
-            Err(e) => format!("Details unavailable: {e}"),
+        // Live values for the same process from the latest table.
+        let (proc_line, live_lines) = {
+            let st = self.proc_state.borrow();
+            let p = st.details_for.and_then(|(pid, start)| {
+                st.last
+                    .as_ref()?
+                    .processes
+                    .as_ref()?
+                    .entries
+                    .iter()
+                    .find(|p| p.id.pid == pid && p.id.start_ticks == start)
+                    .cloned()
+            });
+            let parent = p.as_ref().and_then(|p| {
+                st.last
+                    .as_ref()?
+                    .processes
+                    .as_ref()?
+                    .entries
+                    .iter()
+                    .find(|q| q.id.pid == p.ppid)
+                    .map(|q| format!("{} ({})", safe(&q.name), q.id.pid))
+            });
+            match p {
+                Some(p) => {
+                    let io = match p.disk_io.live() {
+                        Some(d) => format!(
+                            "{} read · {} written",
+                            bytes_rate(d.read_bytes_per_s),
+                            bytes_rate(d.write_bytes_per_s)
+                        ),
+                        None => format!("— ({})", p.disk_io.status.label()),
+                    };
+                    (
+                        format!("<b>{}</b>  PID {}", esc(&safe(&p.name)), p.id.pid),
+                        vec![
+                            (
+                                "State",
+                                format!(
+                                    "{} · user {}",
+                                    state_name(p.state),
+                                    safe(&p.user.clone().unwrap_or_else(|| {
+                                        p.uid.map_or("?".into(), |u| u.to_string())
+                                    }))
+                                ),
+                            ),
+                            ("Parent", parent.unwrap_or_else(|| p.ppid.to_string())),
+                            (
+                                "CPU",
+                                format!(
+                                    "{} now · {} total CPU time",
+                                    p.cpu_pct.live().map_or("—".into(), |c| format!("{c:.1}%")),
+                                    units::duration_s(p.cpu_time_s)
+                                ),
+                            ),
+                            (
+                                "Memory",
+                                format!(
+                                    "{} resident · {} virtual",
+                                    units::bytes(p.rss_bytes as f64),
+                                    units::bytes(p.virtual_bytes as f64)
+                                ),
+                            ),
+                            ("Threads", p.threads.to_string()),
+                            ("Disk", io),
+                        ],
+                    )
+                }
+                None => (String::new(), Vec::new()),
+            }
         };
-        self.proc_details.set_text(&text);
+        let mut rows: Vec<(&str, String)> = live_lines;
+        let failed = match &r {
+            Ok(d) => {
+                rows.push((
+                    "Open files",
+                    match (&d.open_fds, &d.fd_limit) {
+                        (Ok(n), Ok(u64::MAX)) => format!("{n} (no limit)"),
+                        (Ok(n), Ok(l)) => format!("{n} of {l} allowed"),
+                        (Ok(n), Err(_)) => n.to_string(),
+                        (Err(e), _) => reason(e),
+                    },
+                ));
+                rows.push((
+                    "Swap used",
+                    match &d.swap_bytes {
+                        Ok(b) => units::bytes(*b as f64),
+                        Err(e) => reason(e),
+                    },
+                ));
+                rows.push((
+                    "Belongs to",
+                    d.cgroup
+                        .as_ref()
+                        .ok()
+                        .filter(|c| !c.is_empty() && c.as_str() != "/")
+                        .map_or("—".to_string(), |c| {
+                            let (k, n) = nysm_collect::linux::parse::cgroup_classify(
+                                c.trim_start_matches('/'),
+                            );
+                            format!("{} {}", k.label(), safe(&n))
+                        }),
+                ));
+                rows.push(("Executable", show(&d.exe)));
+                rows.push(("Working directory", show(&d.cwd)));
+                rows.push(("Cgroup", show(&d.cgroup)));
+                None
+            }
+            Err(e) => {
+                // Gone or unreadable: stop refreshing.
+                self.proc_state.borrow_mut().details_for = None;
+                Some(format!("Details unavailable: {e}"))
+            }
+        };
+        let mut markup = String::new();
+        if !proc_line.is_empty() {
+            markup.push_str(&proc_line);
+            markup.push_str("\n\n");
+        }
+        if let Some(f) = failed {
+            markup.push_str(&esc(&f));
+            markup.push_str("\n\n");
+        }
+        for (k, v) in &rows {
+            markup.push_str(&format!(
+                "<span size=\"small\" alpha=\"60%\">{}</span>\n{}\n\n",
+                esc(k),
+                esc(v)
+            ));
+        }
+        markup.push_str("<span size=\"small\" alpha=\"60%\">Command line is hidden by default (nysm inspect --show-args).</span>");
+        if self.proc_state.borrow().details_for.is_some() {
+            let now = gtk::glib::DateTime::now_local()
+                .ok()
+                .and_then(|t| t.format("%H:%M:%S").ok())
+                .map_or(String::new(), |t| format!(" · updated {t}"));
+            markup.push_str(&format!(
+                "\n<span size=\"small\" alpha=\"60%\">Live{} (every second while this page is open)</span>",
+                esc(&now)
+            ));
+        }
+        self.proc_details.set_markup(&markup);
     }
 
     pub fn visible_page(&self) -> String {
@@ -741,6 +1082,7 @@ impl Pages {
         s: &Arc<Snapshot>,
         history: &[HistoryPoint],
         alerts: &[ActiveAlert],
+        pinned: &[nysm_core::history::PinnedProcess],
         visible: &str,
     ) {
         self.record_cores(s);
@@ -1002,16 +1344,19 @@ impl Pages {
         }
 
         if visible == "processes" {
+            self.update_watch(pinned);
             let ts = s.processes.as_ref().map(|t| t.timestamp_ms);
             let changed = self.proc_state.borrow().rendered_ts != ts;
             self.proc_state.borrow_mut().last = Some(s.clone());
             if changed {
+                let prev = std::mem::take(&mut self.proc_state.borrow_mut().rows);
                 let rows = render_processes(
                     s,
                     &self.proc_table,
                     &self.proc_count,
                     &self.proc_search.text(),
                     sort_key(self.proc_sort.selected()),
+                    &prev,
                 );
                 let mut st = self.proc_state.borrow_mut();
                 st.rows = rows;
@@ -1453,7 +1798,8 @@ fn render_processes(
     count: &gtk::Label,
     filter: &str,
     key: ProcessSort,
-) -> Vec<(u32, u64)> {
+    prev: &[(u32, u64, String)],
+) -> RowIds {
     let Some(t) = &s.processes else {
         count.set_text("process list not available");
         table.set_rows(Vec::new());
@@ -1488,9 +1834,25 @@ fn render_processes(
             r,
             w,
         ]);
-        ids.push((p.id.pid, p.id.start_ticks));
+        ids.push((p.id.pid, p.id.start_ticks, p.name.clone()));
     }
+    // Rows are re-sorted on every refresh; keep the selection on the same
+    // processes rather than the same positions.
+    let selected: Vec<(u32, u64)> = table
+        .selected_rows()
+        .into_iter()
+        .filter_map(|i| prev.get(i).map(|r| (r.0, r.1)))
+        .collect();
     table.set_rows(rows);
+    if !selected.is_empty() {
+        let keep: Vec<usize> = ids
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| selected.contains(&(r.0, r.1)))
+            .map(|(i, _)| i)
+            .collect();
+        table.select_rows(&keep);
+    }
     ids
 }
 

@@ -118,6 +118,21 @@ pub struct WireDetails {
     pub cwd: WireField<String>,
     pub cgroup: WireField<String>,
     pub open_fds: WireField<u32>,
+    /// Absent from older collectors.
+    #[serde(default = "WireField::older_collector")]
+    pub fd_limit: WireField<u64>,
+    #[serde(default = "WireField::older_collector")]
+    pub swap_bytes: WireField<u64>,
+}
+
+impl<T> WireField<T> {
+    fn older_collector() -> Self {
+        WireField {
+            status: nysm_core::Status::Unsupported,
+            value: None,
+            reason: Some("not reported by this collector version".into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

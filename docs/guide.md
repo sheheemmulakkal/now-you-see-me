@@ -144,9 +144,13 @@ nysm watch               # one line per second, until Ctrl-C
 3. Look closer at one process: `nysm inspect --pid 1234` (TUI: select it and
    press `Enter`; desktop: double-click it).
 
-### …watch one process over time?
-In the TUI, select it and press `*` to pin it. Its CPU and memory history
-is kept and charted even if it leaves the top of the list.
+### …watch one or more processes over time?
+In the desktop app, select processes on the Processes page (Ctrl/Shift-click
+for several) and press **Watch**: each gets a tile with live CPU and memory
+charts, kept even when it drops out of the top of the list or exits (up to 8).
+In the TUI, select a process and press `*`. Selecting a single process also
+shows its details, refreshed every second: state, parent, CPU, memory, threads,
+disk, open files against the limit, swap, and where it belongs.
 
 ### …find who is using a port?
 ```sh
@@ -285,7 +289,8 @@ Processes. Header: live/stale status, chart time range, theme, settings.
 | --- | --- |
 | `Alt+1` … `Alt+7` | pages, numbered like the TUI views |
 | `Ctrl+F` | process filter (or just start typing on the Processes page) |
-| `Enter` / double-click | process details |
+| click / arrow keys | live details of the selected process (every second) |
+| Ctrl/Shift-click, then **Watch** | watch up to 8 processes with CPU and memory charts |
 | `Ctrl+,` | settings (network unit, sampling interval, history length) |
 | `Ctrl+W`, `Ctrl+Q` | close |
 

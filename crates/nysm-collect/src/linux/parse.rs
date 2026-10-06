@@ -411,6 +411,30 @@ pub fn os_release(text: &str) -> (Option<String>, Option<String>) {
 }
 
 /// `/etc/passwd` → (uid, name). Ignores NSS sources (LDAP, sssd).
+/// Soft "Max open files" from `/proc/<pid>/limits`; `u64::MAX` = unlimited.
+pub fn limits_open_files(text: &str) -> Option<u64> {
+    let rest = text
+        .lines()
+        .find_map(|l| l.strip_prefix("Max open files"))?;
+    let soft = rest.split_whitespace().next()?;
+    if soft == "unlimited" {
+        Some(u64::MAX)
+    } else {
+        soft.parse().ok()
+    }
+}
+
+/// `VmSwap` from `/proc/<pid>/status`, in bytes. Absent for kernel threads.
+pub fn status_vm_swap(text: &str) -> Option<u64> {
+    let rest = text.lines().find_map(|l| l.strip_prefix("VmSwap:"))?;
+    let mut it = rest.split_whitespace();
+    let n: u64 = it.next()?.parse().ok()?;
+    match it.next() {
+        Some("kB") | None => Some(n * 1024),
+        _ => None,
+    }
+}
+
 pub fn passwd(text: &str) -> Vec<(u32, String)> {
     text.lines()
         .filter(|l| !l.starts_with('#'))
@@ -427,6 +451,24 @@ pub fn passwd(text: &str) -> Vec<(u32, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn process_limits_and_swap() {
+        let limits = "Limit                     Soft Limit           Hard Limit           Units     \n\
+                      Max cpu time              unlimited            unlimited            seconds   \n\
+                      Max open files            1024                 524288               files     \n";
+        assert_eq!(limits_open_files(limits), Some(1024));
+        assert_eq!(
+            limits_open_files(
+                "Max open files            unlimited            unlimited            files\n"
+            ),
+            Some(u64::MAX)
+        );
+        assert_eq!(limits_open_files("nothing"), None);
+        let status = "Name:\tbash\nVmRSS:\t   5000 kB\nVmSwap:\t     12 kB\n";
+        assert_eq!(status_vm_swap(status), Some(12 * 1024));
+        assert_eq!(status_vm_swap("Name:\tkthreadd\n"), None);
+    }
 
     const STAT: &str = "cpu  4705 356 584 3699 23 23 0 0 0 0\n\
 cpu0 1393280 32966 572056 13343292 6130 0 17875 0 23933 0\n\

@@ -487,6 +487,18 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
         });
     }
     {
+        let state = state.clone();
+        ui.on_watch_changed(move |id, name| {
+            let mut st = state.borrow_mut();
+            match name {
+                Some(n) => st.source.pin(id, n),
+                None => st.source.unpin(id),
+            }
+            // Show the change on the next tick.
+            st.last_seq = 0;
+        });
+    }
+    {
         // Refresh a page as soon as it becomes visible (hidden pages are
         // not updated).
         let state = state.clone();
@@ -586,6 +598,13 @@ fn tick(
         ui.show_details(r);
         st.pending = None;
     }
+    // Keep the details panel live while it is shown.
+    if st.pending.is_none()
+        && let Some((pid, start)) = ui.details_due()
+    {
+        let rx = st.source.request_details(pid, Some(start));
+        st.pending = Some(rx);
+    }
     // Hidden or minimised windows do no rendering work at all.
     if window_hidden(window) {
         return;
@@ -602,10 +621,11 @@ fn tick(
     }
     st.last_seq = snap.seq;
     st.last_at = Instant::now();
-    let (history, alerts) = st.source.with_state(|s| {
+    let (history, alerts, pinned) = st.source.with_state(|s| {
         (
             s.history.iter().copied().collect::<Vec<_>>(),
             s.alerts.clone(),
+            s.pinned.clone(),
         )
     });
     let firing = alerts
@@ -618,7 +638,7 @@ fn tick(
         if firing == 1 { "" } else { "s" }
     ));
     let visible = ui.visible_page();
-    ui.update(&snap, &history, &alerts, &visible);
+    ui.update(&snap, &history, &alerts, &pinned, &visible);
 }
 
 fn screenshot(window: &gtk::ApplicationWindow, path: &std::path::Path) -> Result<(), String> {
