@@ -213,10 +213,11 @@ pub fn save_theme(theme: nysm_config::Theme) {
 }
 
 /// Tray items offered here, in top-bar order: (config key, label).
-const TRAY_ITEMS: [(&str, &str); 5] = [
+const TRAY_ITEMS: [(&str, &str); 6] = [
     ("cpu", "CPU usage"),
     ("mem", "Memory used"),
     ("net", "Network"),
+    ("storage", "Storage used %"),
     ("disk", "Disk activity %"),
     ("diskio", "Disk read / write"),
 ];

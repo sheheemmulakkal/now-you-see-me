@@ -116,7 +116,8 @@ pub struct Display {
     /// socket (opt-in; that socket grants broad privileges).
     pub container_names: bool,
     /// Tray items in the top bar, comma separated, in order:
-    /// cpu, mem, net, disk (activity %), diskio (read/write).
+    /// cpu, mem, net, storage (root filesystem used %), disk (activity %),
+    /// diskio (read/write).
     pub tray_items: String,
 }
 
@@ -127,7 +128,7 @@ impl Default for Display {
             ascii: false,
             theme: Theme::default(),
             container_names: false,
-            tray_items: "cpu,mem,net,disk".into(),
+            tray_items: "cpu,mem,net,storage,disk".into(),
         }
     }
 }

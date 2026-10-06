@@ -31,7 +31,7 @@ rate_unit = "bytes"         # or "bits"
 ascii = false               # TUI: ASCII-only charts/borders
 theme = "system"            # desktop app: system | light | dark
 container_names = false     # desktop app: ask Docker/Podman for container names (opt-in)
-tray_items = "cpu,mem,net,disk"  # tray: cpu, mem, net, disk (activity %), diskio (read/write)
+tray_items = "cpu,mem,net,storage,disk"  # tray: cpu, mem, net, storage (/ used %), disk (activity %), diskio (read/write)
 
 [incidents]                 # opt-in, see docs/incidents.md
 enabled = false

@@ -32,6 +32,8 @@ enum Item {
     Cpu,
     Memory,
     Network,
+    /// How full the root filesystem is (% used, like df).
+    Storage,
     /// Busiest disk's activity (% of time busy).
     Disk,
     /// Disk read and write rates.
@@ -39,10 +41,11 @@ enum Item {
 }
 
 /// Items offered in the "Show in top bar" menu, in display order.
-const CHOICES: [Item; 5] = [
+const CHOICES: [Item; 6] = [
     Item::Cpu,
     Item::Memory,
     Item::Network,
+    Item::Storage,
     Item::Disk,
     Item::DiskIo,
 ];
@@ -53,6 +56,7 @@ impl Item {
             "cpu" => Item::Cpu,
             "mem" | "memory" => Item::Memory,
             "net" | "network" => Item::Network,
+            "storage" => Item::Storage,
             "disk" => Item::Disk,
             "diskio" => Item::DiskIo,
             _ => return None,
@@ -65,6 +69,7 @@ impl Item {
             Item::Cpu => "cpu",
             Item::Memory => "mem",
             Item::Network => "net",
+            Item::Storage => "storage",
             Item::Disk => "disk",
             Item::DiskIo => "diskio",
         }
@@ -76,6 +81,7 @@ impl Item {
             Item::Cpu => "CPU usage",
             Item::Memory => "Memory used",
             Item::Network => "Network download / upload",
+            Item::Storage => "Storage used (%)",
             Item::Disk => "Disk activity (%)",
             Item::DiskIo => "Disk read / write",
         }
@@ -98,6 +104,7 @@ impl Item {
             Item::Cpu => format!("{base}-cpu"),
             Item::Memory => format!("{base}-memory"),
             Item::Network => format!("{base}-network"),
+            Item::Storage => format!("{base}-storage"),
             Item::Disk => format!("{base}-disk"),
             Item::DiskIo => format!("{base}-diskio"),
         }
@@ -109,6 +116,7 @@ impl Item {
             Item::Cpu => glyphs::CPU,
             Item::Memory => glyphs::MEMORY,
             Item::Network => glyphs::NETWORK,
+            Item::Storage => glyphs::STORAGE,
             Item::Disk | Item::DiskIo => glyphs::DISK,
         }
     }
@@ -119,7 +127,7 @@ impl Item {
             Item::Cpu => "100%",
             Item::Memory => "999G",
             Item::Network => "↓999M ↑999M",
-            Item::Disk => "100%",
+            Item::Storage | Item::Disk => "100%",
             Item::DiskIo => "R999M W999M",
         }
     }
@@ -143,6 +151,16 @@ struct NysmTray {
     /// Items chosen in the menu; `reselect` asks the main loop to apply.
     selection: Arc<std::sync::Mutex<Vec<Item>>>,
     reselect: Arc<AtomicBool>,
+}
+
+/// The root filesystem (`/`), if reported.
+fn root_fs(s: &Snapshot) -> Option<&nysm_core::snapshot::FilesystemSnapshot> {
+    s.storage
+        .filesystems
+        .value
+        .as_ref()?
+        .iter()
+        .find(|f| f.mount_point == "/")
 }
 
 /// Activity of the busiest whole disk (the total carries it, so it is
@@ -359,6 +377,10 @@ impl NysmTray {
             // Fill at the end: the item's width is constant; only the
             // upload value may shift slightly inside it.
             Item::Network => format!("↓{} ↑{}{}{}", rx.0, tx.0, rx.1, tx.1),
+            Item::Storage => {
+                let d = root_fs(s).map_or_else(dash, |f| fixed_pct(f.used_pct));
+                d.0 + &d.1
+            }
             Item::Disk => {
                 let d = disk_busy(s).map_or_else(dash, |b| fixed_pct(b.min(100.0)));
                 d.0 + &d.1
@@ -409,6 +431,21 @@ impl NysmTray {
                     .live()
                     .map_or("—".into(), |n| rate(n.tx_bytes_per_s))
             ),
+            match root_fs(s) {
+                Some(f) => format!(
+                    "Storage / {} of {} ({:.0}%), {} free{}",
+                    units::bytes(f.used_bytes as f64),
+                    units::bytes(f.total_bytes as f64),
+                    f.used_pct,
+                    units::bytes(f.available_bytes as f64),
+                    match (f.growth_bytes_per_hour, f.full_in_hours) {
+                        (Some(g), Some(h)) if g > 1024.0 * 1024.0 && h < 24.0 * 14.0 =>
+                            format!(" · full in ~{} at this rate", units::duration_s(h * 3600.0)),
+                        _ => String::new(),
+                    }
+                ),
+                None => "Storage / —".into(),
+            },
             format!(
                 "Disk read {}  write {}{}",
                 s.storage
@@ -619,7 +656,8 @@ fn engine_config(s: &nysm_config::Settings) -> nysm_engine::EngineConfig {
         processes: false,
         process_interval: s.process_interval,
         cgroups: false,
-        filesystems: false,
+        // For the "storage used" item (statvfs on a worker every 15 s).
+        filesystems: true,
         filesystem_interval: s.filesystem_interval,
         frequency: false,
         sensors: true,
@@ -690,7 +728,15 @@ fn main() {
     // Command line first, then the saved choice, then everything but diskio.
     let mut items = items
         .or_else(|| Item::parse_list(&settings.tray_items))
-        .unwrap_or_else(|| vec![Item::Cpu, Item::Memory, Item::Network, Item::Disk]);
+        .unwrap_or_else(|| {
+            vec![
+                Item::Cpu,
+                Item::Memory,
+                Item::Network,
+                Item::Storage,
+                Item::Disk,
+            ]
+        });
     let icon_dir = if items.iter().any(|i| *i != Item::Meter) {
         match glyphs::install() {
             Some(d) => d.to_string_lossy().into_owned(),

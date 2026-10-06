@@ -347,7 +347,10 @@ fn strip_details(s: &mut nysm_core::snapshot::Snapshot) {
     let omitted = || "omitted for lite subscription".to_string();
     s.network.interfaces = Reading::missing(Status::Unsupported, omitted());
     s.storage.devices = Reading::missing(Status::Unsupported, omitted());
-    s.storage.filesystems = Reading::missing(Status::Unsupported, omitted());
+    // Keep only the root filesystem: panels show how full it is.
+    if let Some(v) = s.storage.filesystems.value.as_mut() {
+        v.retain(|f| f.mount_point == "/");
+    }
     s.cpu.per_core.clear();
 }
 

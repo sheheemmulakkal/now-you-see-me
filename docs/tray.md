@@ -21,7 +21,8 @@ cp packaging/linux/nysm-tray.desktop ~/.config/autostart/
 ## What it shows
 - **Top bar (default)**: one item per metric, each a symbolic icon with
   its value next to it — CPU `24%`, memory `6.2G`, network `↓1.8M ↑240K`,
-  disk activity `12%` (busiest disk), optionally disk read/write `R1.2M W340K`.
+  storage used `87%` (the `/` filesystem, like `df`), disk activity `12%`
+  (busiest disk), optionally disk read/write `R1.2M W340K`.
   Values are compact (bytes per second, binary prefixes; bits with
   `--rate-unit bits`) and every item keeps exactly the same width: numbers are
   filled to three digits and a period with figure/punctuation spaces (as wide
@@ -31,7 +32,7 @@ cp packaging/linux/nysm-tray.desktop ~/.config/autostart/
   24.04: icon positions moved 0 px over 30 s. A `⚠` appears before the first value while an
   alert fires. The icons are symbolic, so the panel recolours them.
 - **Choose what to show**: menu → *Show in top bar* → CPU usage, Memory used,
-  Network download / upload, Disk activity (%), Disk read / write. At least
+  Network download / upload, Storage used (%), Disk activity (%), Disk read / write. At least
   one item always stays (the last one is greyed out). Applied at once and saved as `display.tray_items` (e.g. `"cpu,mem,net,disk"`);
   `--items cpu,mem,net,disk,diskio` overrides it for one run.
 - **From the desktop app**: Settings (Ctrl+,) → *Top bar*: show or hide the
