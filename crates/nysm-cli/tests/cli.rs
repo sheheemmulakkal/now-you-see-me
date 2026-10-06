@@ -364,3 +364,28 @@ fn failed_services_never_errors_without_systemd() {
     // Either systemd answered (OK) or both managers are reported unavailable (exit 1).
     assert!(o.status.code() == Some(0) || v["errors"].as_array().unwrap().len() == 2);
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn inspect_shows_own_listening_socket_and_group() {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    let me = std::process::id().to_string();
+    let v = json(&nysm(&[
+        "inspect", "--pid", &me, "--json", "--warmup", "100ms",
+    ]));
+    let socks = v["sockets"]["value"]
+        .as_array()
+        .expect("sockets readable for own process");
+    assert!(
+        socks
+            .iter()
+            .any(|s| s["state"] == "listen" && s["local_port"] == port),
+        "{socks:?}"
+    );
+    // Every process on a cgroup v2 system belongs to some group.
+    if v["cgroup"]["status"] == "available" {
+        assert!(v["belongs_to"]["kind"].is_string());
+    }
+    drop(l);
+}

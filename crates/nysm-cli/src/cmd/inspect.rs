@@ -45,8 +45,19 @@ struct Output<'a> {
     cwd: Field<String>,
     cgroup: Field<String>,
     open_fds: Field<u32>,
+    /// Service/container/app the process belongs to (from its cgroup).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    belongs_to: Option<BelongsTo>,
+    /// Sockets this process holds (visible ones; this network namespace).
+    sockets: Field<Vec<nysm_core::sockets::SocketEntry>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cmdline: Option<Field<Vec<String>>>,
+}
+
+#[derive(Serialize)]
+struct BelongsTo {
+    kind: nysm_core::raw::CgroupKind,
+    name: String,
 }
 
 #[derive(Serialize)]
@@ -93,6 +104,30 @@ pub fn run(ctx: &Ctx, pid: u32, show_args: bool, json: bool, warmup: Duration) -
             name: &x.name,
         })
         .collect();
+    // Service/container association from the cgroup path (best effort).
+    let belongs_to = d
+        .cgroup
+        .as_ref()
+        .ok()
+        .filter(|c| !c.is_empty() && c.as_str() != "/")
+        .map(|c| {
+            let (kind, name) =
+                nysm_collect::linux::parse::cgroup_classify(c.trim_start_matches('/'));
+            BelongsTo { kind, name }
+        });
+    // Sockets owned by exactly this process (PID + start time).
+    let sockets = engine.sockets(true).map(|all| {
+        let mut v: Vec<_> = all
+            .into_iter()
+            .filter(|s| {
+                s.owners
+                    .iter()
+                    .any(|o| o.id.pid == pid && o.id.start_ticks == p.id.start_ticks)
+            })
+            .collect();
+        v.sort_by_key(|s| (!s.is_listening(), s.local_port));
+        v
+    });
     let o = Output {
         schema_version: nysm_core::SCHEMA_VERSION,
         producer: nysm_core::brand::PRODUCER,
@@ -105,6 +140,8 @@ pub fn run(ctx: &Ctx, pid: u32, show_args: bool, json: bool, warmup: Duration) -
         cwd: field(d.cwd),
         cgroup: field(d.cgroup),
         open_fds: field(d.open_fds),
+        belongs_to,
+        sockets: field(sockets),
         cmdline: d.cmdline.map(field),
     };
     let mut out = io::stdout().lock();
@@ -208,7 +245,68 @@ pub fn run(ctx: &Ctx, pid: u32, show_args: bool, json: bool, warmup: Duration) -
     )?;
     row(&mut out, "executable", f(&o.exe))?;
     row(&mut out, "working dir", f(&o.cwd))?;
+    if let Some(b) = &o.belongs_to {
+        row(
+            &mut out,
+            "belongs to",
+            format!("{} {}", b.kind.label(), fmt::safe(&b.name)),
+        )?;
+    }
     row(&mut out, "cgroup", f(&o.cgroup))?;
+    match &o.sockets.value {
+        Some(v) => {
+            let ep = |a: &std::net::IpAddr, port: u16| match a {
+                std::net::IpAddr::V6(x) => format!("[{x}]:{port}"),
+                std::net::IpAddr::V4(x) => format!("{x}:{port}"),
+            };
+            let proto = |p: nysm_core::sockets::Protocol| match p {
+                nysm_core::sockets::Protocol::Tcp => "tcp",
+                nysm_core::sockets::Protocol::Udp => "udp",
+            };
+            let listening: Vec<String> = v
+                .iter()
+                .filter(|s| s.is_listening())
+                .map(|s| format!("{} {}", proto(s.protocol), ep(&s.local_addr, s.local_port)))
+                .collect();
+            let conns: Vec<&nysm_core::sockets::SocketEntry> =
+                v.iter().filter(|s| !s.is_listening()).collect();
+            row(
+                &mut out,
+                "listening",
+                if listening.is_empty() {
+                    st.dim("none")
+                } else {
+                    listening.join(", ")
+                },
+            )?;
+            let mut text = format!("{}", conns.len());
+            if !conns.is_empty() {
+                let shown: Vec<String> = conns
+                    .iter()
+                    .take(6)
+                    .map(|s| {
+                        format!(
+                            "{} {} → {} ({})",
+                            proto(s.protocol),
+                            ep(&s.local_addr, s.local_port),
+                            ep(&s.remote_addr, s.remote_port),
+                            s.state.label()
+                        )
+                    })
+                    .collect();
+                text += &format!(": {}", shown.join("; "));
+                if conns.len() > 6 {
+                    text += &format!(" … +{}", conns.len() - 6);
+                }
+            }
+            row(&mut out, "connections", text)?;
+        }
+        None => row(
+            &mut out,
+            "sockets",
+            st.dim(&format!("— ({})", o.sockets.status.label())),
+        )?,
+    }
     row(
         &mut out,
         "open fds",

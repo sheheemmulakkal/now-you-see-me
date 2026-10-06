@@ -599,7 +599,16 @@ impl Pages {
         };
         let text = match r {
             Ok(d) => format!(
-                "Executable\n{}\n\nWorking directory\n{}\n\nCgroup\n{}\n\nOpen file descriptors\n{}\n\nCommand line is hidden by default (nysm inspect --show-args).",
+                "Belongs to\n{}\n\nExecutable\n{}\n\nWorking directory\n{}\n\nCgroup\n{}\n\nOpen file descriptors\n{}\n\nCommand line is hidden by default (nysm inspect --show-args).",
+                d.cgroup
+                    .as_ref()
+                    .ok()
+                    .filter(|c| !c.is_empty() && c.as_str() != "/")
+                    .map_or("—".to_string(), |c| {
+                        let (k, n) =
+                            nysm_collect::linux::parse::cgroup_classify(c.trim_start_matches('/'));
+                        format!("{} {}", k.label(), safe(&n))
+                    }),
                 show(&d.exe),
                 show(&d.cwd),
                 show(&d.cgroup),

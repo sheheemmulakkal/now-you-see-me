@@ -21,6 +21,8 @@ Added split .deb packages (scripts/package-deb.sh), tested in a Debian 12 contai
 Added incident snapshots (docs/incidents.md), "busiest processes" in recording summaries, GPU via DRM sysfs,
 ADR 0009 (GUI strategy) and 0010 (remote threat model), and `nysm tui --remote` over SSH (docs/remote.md), opt-in container names (`--names`),
 soak data (docs/performance.md), tray re-attach to a returning service.
+Committed as 23ed65c on feat/initial-implementation (user approved commits).
+Then: inspector sockets + belongs-to, timeline alert-event correlation.
 Next: aarch64 (needs emulation or hardware), macOS/Windows adapters, GPU (optional), container name resolver (opt-in).
 
 Open owner decisions: licence; whether to commit (all work is staged,

@@ -26,6 +26,10 @@ Legend: ✅ done and verified · 🟡 partial · ⬜ not started
 - ⬜ macOS and Windows CLI/TUI adapters (needs those machines/runners)
 - ⬜ ARM64 run on real hardware or CI runner
 
+## Inspector and timeline (brief §8.1, §8.3)
+- ✅ `inspect`: listening ports and connections of the process, service/container/app it belongs to (also in TUI and desktop details)
+- ✅ TUI timeline cursor shows alert events at that moment and gaps; live header shows the last alert event
+
 ## Milestone 3: Ubuntu desktop and panel
 - ✅ Per-user collector service + Unix socket protocol (ADR 0005); TUI attaches with fallback
 - 🟡 GTK4 desktop (`nysm-desktop`): all pages, attach/fallback, dark mode, hidden-window idle (experimental; libadwaita and ColumnView process list pending; see docs/desktop.md)

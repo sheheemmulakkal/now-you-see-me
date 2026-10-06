@@ -198,3 +198,23 @@ fn groups_view_renders_real_cgroups() {
     let s = render(&mut app, 80, 24);
     assert!(s.contains("7 Groups"), "{s}");
 }
+
+#[test]
+fn timeline_cursor_shows_alert_event_at_that_moment() {
+    use nysm_core::alerts::{AlertEvent, AlertEventKind, AlertMetric};
+    let mut app = app_from(Engine::with_platform(nysm_collect::unsupported(), cfg()), 4);
+    let p = app.live_history[app.live_history.len() - 2];
+    app.alert_events = vec![AlertEvent {
+        rule: "memory-pressure".into(),
+        metric: AlertMetric::MemoryPressurePct,
+        target: None,
+        timestamp_ms: p.timestamp_ms,
+        kind: AlertEventKind::Fired { value: 20.0, threshold: 10.0, sustained_s: 30.0 },
+    }];
+    // Live view mentions the most recent event.
+    assert!(render(&mut app, 100, 30).contains("last alert event"));
+    // Cursor one step back lands on the event.
+    app.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    let s = render(&mut app, 120, 30);
+    assert!(s.contains("event: memory-pressure"), "{s}");
+}

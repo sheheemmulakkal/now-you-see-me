@@ -465,25 +465,51 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
     let spark_w = area.width.saturating_sub(label_w + 1) as usize;
 
     // Timeline header line.
+    // Alert events correlated with the timeline (observations, not causes).
+    let interval_ms = s.interval_ms.unwrap_or(1000) as i64;
+    let event_at = |ts: i64| {
+        app.alert_events
+            .iter()
+            .rev()
+            .find(|e| e.timestamp_ms > ts - interval_ms && e.timestamp_ms <= ts + interval_ms / 2)
+    };
     let head = match &point {
-        Some(p) => Line::from(vec![
-            Span::styled(
+        Some(p) => {
+            let mut spans = vec![Span::styled(
                 format!(
                     " timeline: {} ({}s ago) ",
                     clock(p.timestamp_ms),
                     (s.timestamp_ms - p.timestamp_ms) / 1000
                 ),
                 t.alert(),
-            ),
-            Span::styled(
-                "  values below are from the cursor; Esc returns to live",
-                t.dim(),
-            ),
-        ]),
+            )];
+            match event_at(p.timestamp_ms) {
+                Some(e) => spans.push(Span::styled(
+                    format!("  event: {} {}", safe(&e.rule), safe(&e.describe())),
+                    t.bold(),
+                )),
+                None if p.gap_before => spans.push(Span::styled(
+                    "  gap before this sample (suspend or stall)",
+                    t.dim(),
+                )),
+                None => spans.push(Span::styled(
+                    "  values below are from the cursor; Esc returns to live",
+                    t.dim(),
+                )),
+            }
+            Line::from(spans)
+        }
         None => alert_line(app, t).unwrap_or_else(|| {
+            let last = app.alert_events.last().map_or(String::new(), |e| {
+                format!(
+                    " · last alert event {}s ago: {}",
+                    (s.timestamp_ms - e.timestamp_ms).max(0) / 1000,
+                    safe(&e.rule)
+                )
+            });
             Line::from(Span::styled(
                 format!(
-                    "now {} · {}",
+                    "now {} · {}{last}",
                     clock(s.timestamp_ms),
                     history_span(&h, spark_w)
                 ),
@@ -933,6 +959,17 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App, s: &Snapshot, t: &Theme) {
             };
             lines.push(kv("exe", show(&x.exe)));
             lines.push(kv("cwd", show(&x.cwd)));
+            if let Ok(c) = &x.cgroup
+                && !c.is_empty()
+                && c != "/"
+            {
+                let (kind, name) =
+                    nysm_collect::linux::parse::cgroup_classify(c.trim_start_matches('/'));
+                lines.push(kv(
+                    "belongs to",
+                    format!("{} {}", kind.label(), safe(&name)),
+                ));
+            }
             lines.push(kv("cgroup", show(&x.cgroup)));
             lines.push(kv(
                 "open fds",
