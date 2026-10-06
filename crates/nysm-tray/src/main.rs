@@ -9,7 +9,9 @@
 
 mod glyphs;
 mod icon;
+mod strip;
 
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -29,6 +31,8 @@ use nysm_ipc::source::{Attach, Source};
 enum Item {
     /// Single item: CPU/memory meter icon, all values in the label.
     Meter,
+    /// Single item: one wide image with all chosen parts (GNOME/Ubuntu).
+    Strip,
     Cpu,
     Memory,
     Network,
@@ -66,6 +70,7 @@ impl Item {
     fn key(self) -> &'static str {
         match self {
             Item::Meter => "meter",
+            Item::Strip => "strip",
             Item::Cpu => "cpu",
             Item::Memory => "mem",
             Item::Network => "net",
@@ -78,6 +83,7 @@ impl Item {
     fn menu_label(self) -> &'static str {
         match self {
             Item::Meter => "Meter",
+            Item::Strip => "Strip",
             Item::Cpu => "CPU usage",
             Item::Memory => "Memory used",
             Item::Network => "Network download / upload",
@@ -94,7 +100,7 @@ impl Item {
             Item::Memory => Some("RAM"),
             Item::Storage => Some("Disk"),
             Item::Disk => Some("I/O"),
-            Item::Meter | Item::Network | Item::DiskIo => None,
+            Item::Meter | Item::Strip | Item::Network | Item::DiskIo => None,
         }
     }
 
@@ -112,6 +118,7 @@ impl Item {
         let base = nysm_core::brand::COMMAND_NAME;
         match self {
             Item::Meter => base.into(),
+            Item::Strip => format!("{base}-strip"),
             Item::Cpu => format!("{base}-cpu"),
             Item::Memory => format!("{base}-memory"),
             Item::Network => format!("{base}-network"),
@@ -123,7 +130,7 @@ impl Item {
 
     fn icon_name(self) -> &'static str {
         match self {
-            Item::Meter => "",
+            Item::Meter | Item::Strip => "",
             Item::Cpu => glyphs::CPU,
             Item::Memory => glyphs::MEMORY,
             Item::Network => glyphs::NETWORK,
@@ -135,6 +142,7 @@ impl Item {
     fn guide(self) -> &'static str {
         match self {
             Item::Meter => "100% · 999G · ↓999M ↑999M",
+            Item::Strip => "",
             Item::Cpu => "100%",
             Item::Memory => "999G",
             Item::Network => "↓999M ↑999M",
@@ -164,6 +172,10 @@ struct NysmTray {
     /// Set when the tray host comes back (e.g. after a screen lock), so the
     /// main loop can re-register all items in a stable order.
     host_back: Arc<AtomicBool>,
+    /// Strip layout: writes the image this item shows.
+    strip: Option<strip::Writer>,
+    /// Text scale for the strip (GNOME text-scaling-factor).
+    text_scale: f64,
     /// Items chosen in the menu; `reselect` asks the main loop to apply.
     selection: Arc<std::sync::Mutex<Vec<Item>>>,
     reselect: Arc<AtomicBool>,
@@ -389,11 +401,97 @@ impl NysmTray {
         format!("{alert}{name}{text}")
     }
 
+    /// Strip layout: draw the chosen parts into the image file.
+    fn render_strip(&mut self) {
+        if self.item != Item::Strip {
+            return;
+        }
+        let chosen = self.selection.lock().map(|v| v.clone()).unwrap_or_default();
+        let s = self.snap.clone();
+        let dash = || "—".to_string();
+        let rate = |v: Option<f64>, unit: RateUnit| v.map_or_else(dash, |v| fixed_rate(v, unit).0);
+        let parts: Vec<strip::Part> = chosen
+            .iter()
+            .filter_map(|item| {
+                let s = s.as_deref();
+                let icon = glyphs::body(item.icon_name());
+                let name = item.short_name();
+                let one = |v: String, widest: &'static str| vec![("", v, widest)];
+                let fields = match item {
+                    Item::Cpu => one(
+                        s.and_then(|s| s.cpu.usage.live().map(|c| fixed_pct(c.total_pct).0))
+                            .unwrap_or_else(dash),
+                        "100%",
+                    ),
+                    Item::Memory => one(
+                        s.and_then(|s| {
+                            s.memory
+                                .usage
+                                .live()
+                                .map(|m| fixed_bytes(m.used_bytes as f64, m.total_bytes as f64).0)
+                        })
+                        .unwrap_or_else(dash),
+                        "99.9G",
+                    ),
+                    Item::Network => {
+                        let n = s.and_then(|s| s.network.total.live().copied());
+                        vec![
+                            ("↓", rate(n.map(|n| n.rx_bytes_per_s), self.rate), "999M"),
+                            ("↑", rate(n.map(|n| n.tx_bytes_per_s), self.rate), "999M"),
+                        ]
+                    }
+                    Item::Storage => one(
+                        s.and_then(root_fs)
+                            .map_or_else(dash, |f| fixed_pct(f.used_pct).0),
+                        "100%",
+                    ),
+                    Item::Disk => one(
+                        s.and_then(disk_busy)
+                            .map_or_else(dash, |b| fixed_pct(b.min(100.0)).0),
+                        "100%",
+                    ),
+                    Item::DiskIo => {
+                        let d = s.and_then(|s| s.storage.total_io.live().copied());
+                        vec![
+                            (
+                                "R ",
+                                rate(d.map(|d| d.read_bytes_per_s), RateUnit::Bytes),
+                                "999M",
+                            ),
+                            (
+                                "W ",
+                                rate(d.map(|d| d.write_bytes_per_s), RateUnit::Bytes),
+                                "999M",
+                            ),
+                        ]
+                    }
+                    Item::Meter | Item::Strip => return None,
+                };
+                Some(strip::Part { icon, name, fields })
+            })
+            .collect();
+        let style = strip::Style {
+            icons: self.show_icons.load(Ordering::Relaxed),
+            names: self.show_names.load(Ordering::Relaxed),
+            stale: self.stale || self.snap.is_none(),
+            alert: !self.firing.is_empty(),
+            scale: self.text_scale,
+        };
+        let svg = strip::svg(&parts, &style);
+        if let Some(w) = self.strip.as_mut() {
+            w.write(&svg);
+        }
+    }
+
     /// What this item shows, for the top of its menu.
     fn heading(&self) -> String {
         let s = self.snap.as_deref();
         match self.item {
             Item::Meter => nysm_core::brand::PRODUCT_NAME.into(),
+            Item::Strip => format!(
+                "{}: CPU usage · RAM in use · network ↓↑ · Disk = storage used on / · I/O = disk activity · R/W = disk read/write",
+                nysm_core::brand::PRODUCT_NAME
+            ),
             Item::Cpu => "CPU: usage of all cores".into(),
             Item::Memory => "RAM: memory in use".into(),
             Item::Network => "Network: ↓ download  ↑ upload, per second".into(),
@@ -414,7 +512,7 @@ impl NysmTray {
     /// The item that carries the alert marker (leftmost).
     fn first_item(&self) -> Item {
         match self.item {
-            Item::Meter => Item::Meter,
+            Item::Meter | Item::Strip => self.item,
             _ => Item::Cpu,
         }
     }
@@ -443,6 +541,7 @@ impl NysmTray {
                 "{}{} · {}{} · ↓{}{} ↑{}{}",
                 cpu.0, cpu.1, mem.0, mem.1, rx.0, rx.1, tx.0, tx.1
             ),
+            Item::Strip => String::new(),
             Item::Cpu => cpu.0 + &cpu.1,
             Item::Memory => mem.0 + &mem.1,
             // Fill at the end: the item's width is constant; only the
@@ -569,6 +668,9 @@ impl ksni::Tray for NysmTray {
     }
 
     fn icon_name(&self) -> String {
+        if let Some(w) = &self.strip {
+            return w.path.clone();
+        }
         if self.show_icons.load(Ordering::Relaxed) {
             self.item.icon_name().into()
         } else {
@@ -593,6 +695,9 @@ impl ksni::Tray for NysmTray {
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
+        if self.item == Item::Strip {
+            return Vec::new();
+        }
         if self.item != Item::Meter {
             if self.show_icons.load(Ordering::Relaxed) {
                 return Vec::new(); // themed icon via icon_name
@@ -621,7 +726,7 @@ impl ksni::Tray for NysmTray {
     }
 
     fn label(&self) -> String {
-        if !self.show_label {
+        if !self.show_label || self.item == Item::Strip {
             return String::new();
         }
         self.label_text()
@@ -727,6 +832,26 @@ impl ksni::Tray for NysmTray {
             }
             .into(),
         );
+        items.push(
+            CheckmarkItem {
+                label: "One compact strip (GNOME)".into(),
+                checked: self.item == Item::Strip,
+                activate: Box::new(|t: &mut Self| {
+                    let v = if t.item == Item::Strip {
+                        "items"
+                    } else {
+                        "strip"
+                    };
+                    if let Some(p) = nysm_config::default_path()
+                        && let Err(e) = nysm_config::set_many(&p, &[("display.tray_layout", v)])
+                    {
+                        eprintln!("nysm-tray: choice not saved: {e}");
+                    }
+                }),
+                ..Default::default()
+            }
+            .into(),
+        );
         items.push(info(self.source.clone()));
         items.push(
             StandardItem {
@@ -786,9 +911,39 @@ fn describe(source: &Source) -> String {
     }
 }
 
+/// Whether to draw all parts as one image: "strip", "items", or "auto"
+/// (strip on GNOME, whose AppIndicator host shows wide images at width).
+fn strip_layout(cfg: &str) -> bool {
+    match cfg {
+        "strip" => true,
+        "items" => false,
+        _ => std::env::var("XDG_CURRENT_DESKTOP")
+            .is_ok_and(|d| d.split(':').any(|x| x.eq_ignore_ascii_case("GNOME"))),
+    }
+}
+
+/// GNOME's text-scaling-factor (large text), best effort; 1.0 otherwise.
+fn gnome_text_scale() -> f64 {
+    std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "text-scaling-factor"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .parse::<f64>()
+                .ok()
+        })
+        .filter(|v| (0.5..=3.0).contains(v))
+        .unwrap_or(1.0)
+}
+
 fn update_all(handles: &[ksni::blocking::Handle<NysmTray>], f: &dyn Fn(&mut NysmTray)) {
     for h in handles {
-        h.update(|t| f(t));
+        h.update(|t| {
+            f(t);
+            t.render_strip();
+        });
     }
 }
 
@@ -877,17 +1032,24 @@ fn main() {
     let quit = Arc::new(AtomicBool::new(false));
     let host_back = Arc::new(AtomicBool::new(false));
     let reselect = Arc::new(AtomicBool::new(false));
+    let strip_mode = Arc::new(AtomicBool::new(strip_layout(&settings.tray_layout)));
+    let text_scale = gnome_text_scale();
     // At least one of names/icons is shown.
     let show_names = Arc::new(AtomicBool::new(settings.tray_names || !settings.tray_icons));
     let show_icons = Arc::new(AtomicBool::new(settings.tray_icons));
     let selection = Arc::new(std::sync::Mutex::new(items.clone()));
     let spawn_all = |source_text: &str| -> Vec<ksni::blocking::Handle<NysmTray>> {
         let mut handles = Vec::new();
-        let items = selection.lock().map(|v| v.clone()).unwrap_or_default();
+        let chosen = selection.lock().map(|v| v.clone()).unwrap_or_default();
+        let items = if strip_mode.load(Ordering::SeqCst) && !chosen.contains(&Item::Meter) {
+            vec![Item::Strip]
+        } else {
+            chosen
+        };
         // Ubuntu's host inserts each new item to the left of the previous
         // one, so register right-to-left to read cpu, mem, net, disk.
         for item in items.iter().rev() {
-            let tray = NysmTray {
+            let mut tray = NysmTray {
                 item: *item,
                 icon_dir: icon_dir.clone(),
                 snap: None,
@@ -902,7 +1064,10 @@ fn main() {
                 host_back: host_back.clone(),
                 selection: selection.clone(),
                 reselect: reselect.clone(),
+                strip: (*item == Item::Strip).then(|| strip::Writer::new(Path::new(&icon_dir))),
+                text_scale,
             };
+            tray.render_strip();
             // Wait for a tray host instead of failing: at login the tray can
             // start before the panel, and GNOME removes the host while the
             // screen is locked.
@@ -948,6 +1113,10 @@ fn main() {
             if m != config_mtime {
                 config_mtime = m;
                 let (cfg, _) = nysm_config::load_or_default(path.as_deref());
+                let strip = strip_layout(&cfg.tray_layout);
+                if strip_mode.swap(strip, Ordering::SeqCst) != strip {
+                    reselect.store(true, Ordering::SeqCst);
+                }
                 let names = cfg.tray_names || !cfg.tray_icons;
                 if show_names.swap(names, Ordering::SeqCst) != names
                     || show_icons.swap(cfg.tray_icons, Ordering::SeqCst) != cfg.tray_icons

@@ -40,6 +40,19 @@ cp packaging/linux/nysm-tray.desktop ~/.config/autostart/
   no tray tooltips, so each item's menu starts with a heading saying what it
   shows. GNOME gives the right side of the bar about half the screen; with many
   items it shortens the longest labels with "…" — show fewer items or no names.
+- **Compact strip (default on GNOME)**: all chosen parts are drawn into one
+  wide SVG image shown by a single tray item. Ubuntu's host displays image
+  files at least 1.5× wider than tall at their own width, so there is no
+  per-item padding, no empty icon slot with names only, and no "…" truncation.
+  Each value has a fixed slot for its widest text, so the image width never
+  changes (measured: left edge on the same pixel for 20 s). The text is drawn by
+  GNOME with the system font; slots use Ubuntu Sans metrics scaled by the text
+  scaling factor, and the colour is white (GNOME's top bar is dark). Written to
+  `$XDG_RUNTIME_DIR/nysm/icons/nysm-strip-{0,1}.svg`. Cost measured: gnome-shell
+  3.2 % of a core with the strip vs 3.3 % with separate items (2.2 % with the
+  tray paused). Menu → *One compact strip* or `display.tray_layout`
+  (`auto` = strip on GNOME, `strip`, `items`) switches; other desktops use
+  separate items.
 - **Choose what to show**: menu → *Show in top bar* → CPU usage, Memory used,
   Network download / upload, Storage used (%), Disk activity (%), Disk read / write. At least
   one item always stays (the last one is greyed out). Applied at once and saved as `display.tray_items` (e.g. `"cpu,mem,net,disk"`);

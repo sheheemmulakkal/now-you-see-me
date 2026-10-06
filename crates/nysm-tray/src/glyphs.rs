@@ -39,6 +39,11 @@ const SVG: [(&str, &str); 5] = [
     ),
 ];
 
+/// The SVG body (16×16 paths) of an icon, for drawing it into the strip.
+pub fn body(name: &str) -> Option<&'static str> {
+    SVG.iter().find(|(n, _)| *n == name).map(|(_, b)| *b)
+}
+
 /// Write the icons (if missing or different) and return the directory.
 pub fn install() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_RUNTIME_DIR")

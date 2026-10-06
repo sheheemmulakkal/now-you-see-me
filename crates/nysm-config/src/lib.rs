@@ -123,6 +123,9 @@ pub struct Display {
     pub tray_names: bool,
     /// Tray: icons before values. Names or icons (or both) are shown.
     pub tray_icons: bool,
+    /// Tray layout: "auto" (one strip image on GNOME, separate items
+    /// elsewhere), "strip", or "items".
+    pub tray_layout: String,
 }
 
 impl Default for Display {
@@ -135,6 +138,7 @@ impl Default for Display {
             tray_items: "cpu,mem,net,storage,disk".into(),
             tray_names: true,
             tray_icons: true,
+            tray_layout: "auto".into(),
         }
     }
 }
@@ -185,6 +189,7 @@ pub struct Settings {
     pub tray_items: String,
     pub tray_names: bool,
     pub tray_icons: bool,
+    pub tray_layout: String,
     pub rules: Vec<Rule>,
     pub incidents: IncidentSettings,
 }
@@ -330,6 +335,7 @@ impl Config {
             tray_items: self.display.tray_items.clone(),
             tray_names: self.display.tray_names,
             tray_icons: self.display.tray_icons,
+            tray_layout: self.display.tray_layout.clone(),
             rules,
             incidents: IncidentSettings {
                 enabled: self.incidents.enabled,

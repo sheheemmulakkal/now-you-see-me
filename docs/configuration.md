@@ -32,6 +32,9 @@ ascii = false               # TUI: ASCII-only charts/borders
 theme = "system"            # desktop app: system | light | dark
 container_names = false     # desktop app: ask Docker/Podman for container names (opt-in)
 tray_items = "cpu,mem,net,storage,disk"  # tray: cpu, mem, net, storage (/ used %), disk (activity %), diskio (read/write)
+tray_names = true           # tray: names before values (CPU, RAM, Disk, I/O)
+tray_icons = true           # tray: icons before values (names or icons stay on)
+tray_layout = "auto"        # tray: auto (one strip image on GNOME), strip, items
 
 [incidents]                 # opt-in, see docs/incidents.md
 enabled = false
