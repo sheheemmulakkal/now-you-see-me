@@ -316,24 +316,36 @@ fn tray_section() -> gtk::Box {
         })
         .collect();
     b.append(&flow);
-    let names = gtk::CheckButton::with_label("Show names before values (CPU, RAM, Disk, I/O)");
-    names.set_active(cur.tray_names);
-    {
+    // Icons, names, or both (at least one stays on).
+    let style = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    let icons = gtk::CheckButton::with_label("Show icons");
+    icons.set_active(cur.tray_icons);
+    let names = gtk::CheckButton::with_label("Show names (CPU, RAM, Disk, I/O)");
+    names.set_active(cur.tray_names || !cur.tray_icons);
+    style.append(&icons);
+    style.append(&names);
+    for (this, other, key) in [
+        (icons.clone(), names.clone(), "display.tray_icons"),
+        (names.clone(), icons.clone(), "display.tray_names"),
+    ] {
         let st = status.clone();
-        names.connect_toggled(move |c| {
+        this.connect_toggled(move |c| {
+            if !c.is_active() && !other.is_active() {
+                c.set_active(true);
+                st.set_text("Icons, names, or both — at least one is shown.");
+                return;
+            }
             let v = if c.is_active() { "true" } else { "false" };
             match nysm_config::default_path()
                 .ok_or_else(|| "no configuration location".to_string())
-                .and_then(|p| {
-                    nysm_config::set_many(&p, &[("display.tray_names", v)])
-                        .map_err(|e| e.to_string())
-                }) {
+                .and_then(|p| nysm_config::set_many(&p, &[(key, v)]).map_err(|e| e.to_string()))
+            {
                 Ok(_) => st.set_text("Saved; the running tray updates within a few seconds."),
                 Err(e) => st.set_text(&format!("Not saved: {e}")),
             }
         });
     }
-    b.append(&names);
+    b.append(&style);
     let checks = std::rc::Rc::new(checks);
     for c in checks.iter() {
         let (all, st) = (checks.clone(), status.clone());

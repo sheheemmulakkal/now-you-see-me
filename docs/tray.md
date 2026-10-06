@@ -33,8 +33,10 @@ cp packaging/linux/nysm-tray.desktop ~/.config/autostart/
   alert fires. The icons are symbolic, so the panel recolours them.
 - **Names**: on by default, short names before values — `CPU 24%`,
   `RAM 9.9G`, `Disk 87%` (storage used on `/`), `I/O 2%` (disk activity);
-  network keeps its arrows and read/write its R/W. Menu → *Show names* (or
-  desktop Settings) turns them off; saved as `display.tray_names`. Ubuntu shows
+  network keeps its arrows and read/write its R/W. Menu → *Show icons* /
+  *Show names* (or desktop Settings) chooses icons, names or both (at least
+  one stays on); saved as `display.tray_icons` / `display.tray_names`. With
+  names only, Ubuntu still reserves the (empty) icon slot. Ubuntu shows
   no tray tooltips, so each item's menu starts with a heading saying what it
   shows. GNOME gives the right side of the bar about half the screen; with many
   items it shortens the longest labels with "…" — show fewer items or no names.

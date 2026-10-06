@@ -158,6 +158,8 @@ struct NysmTray {
     /// Short names before values; shared by all items, set from the menu
     /// or the config file.
     show_names: Arc<AtomicBool>,
+    /// Icons before values (at least one of names/icons is on).
+    show_icons: Arc<AtomicBool>,
     quit: Arc<AtomicBool>,
     /// Set when the tray host comes back (e.g. after a screen lock), so the
     /// main loop can re-register all items in a stable order.
@@ -310,17 +312,28 @@ impl NysmTray {
     /// Names on/off (menu): applies to all items on their next update and
     /// is saved as `display.tray_names`.
     fn toggle_names(&self) {
-        let on = !self.show_names.load(Ordering::Relaxed);
-        self.show_names.store(on, Ordering::Relaxed);
+        self.toggle_style(&self.show_names, &self.show_icons, "display.tray_names");
+    }
+
+    fn toggle_icons(&self) {
+        self.toggle_style(&self.show_icons, &self.show_names, "display.tray_icons");
+    }
+
+    /// Flip names or icons; the other must stay on, so turning off the
+    /// last one is refused. Saved to the config; items are re-created so
+    /// every one updates at once.
+    fn toggle_style(&self, flag: &AtomicBool, other: &AtomicBool, key: &str) {
+        let on = !flag.load(Ordering::Relaxed);
+        if !on && !other.load(Ordering::Relaxed) {
+            return;
+        }
+        flag.store(on, Ordering::Relaxed);
+        let value = if on { "true" } else { "false" };
         if let Some(p) = nysm_config::default_path()
-            && let Err(e) = nysm_config::set_many(
-                &p,
-                &[("display.tray_names", if on { "true" } else { "false" })],
-            )
+            && let Err(e) = nysm_config::set_many(&p, &[(key, value)])
         {
             eprintln!("nysm-tray: choice not saved: {e}");
         }
-        // Re-create items so every label updates at once.
         self.reselect.store(true, Ordering::SeqCst);
     }
 
@@ -556,7 +569,11 @@ impl ksni::Tray for NysmTray {
     }
 
     fn icon_name(&self) -> String {
-        self.item.icon_name().into()
+        if self.show_icons.load(Ordering::Relaxed) {
+            self.item.icon_name().into()
+        } else {
+            String::new()
+        }
     }
 
     fn icon_theme_path(&self) -> String {
@@ -577,7 +594,16 @@ impl ksni::Tray for NysmTray {
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
         if self.item != Item::Meter {
-            return Vec::new();
+            if self.show_icons.load(Ordering::Relaxed) {
+                return Vec::new(); // themed icon via icon_name
+            }
+            // Names only: a transparent image, so the host does not draw
+            // its "missing icon" placeholder.
+            return vec![ksni::Icon {
+                width: 1,
+                height: 1,
+                data: vec![0, 0, 0, 0],
+            }];
         }
         let m = icon::Meter {
             cpu: self
@@ -676,10 +702,26 @@ impl ksni::Tray for NysmTray {
             }
             .into(),
         );
+        let (names, icons) = (
+            self.show_names.load(Ordering::Relaxed),
+            self.show_icons.load(Ordering::Relaxed),
+        );
+        items.push(
+            CheckmarkItem {
+                label: "Show icons".into(),
+                checked: icons,
+                // The last of names/icons cannot be turned off.
+                enabled: names || !icons,
+                activate: Box::new(|t: &mut Self| t.toggle_icons()),
+                ..Default::default()
+            }
+            .into(),
+        );
         items.push(
             CheckmarkItem {
                 label: "Show names (CPU, RAM, Disk, I/O)".into(),
-                checked: self.show_names.load(Ordering::Relaxed),
+                checked: names,
+                enabled: icons || !names,
                 activate: Box::new(|t: &mut Self| t.toggle_names()),
                 ..Default::default()
             }
@@ -835,7 +877,9 @@ fn main() {
     let quit = Arc::new(AtomicBool::new(false));
     let host_back = Arc::new(AtomicBool::new(false));
     let reselect = Arc::new(AtomicBool::new(false));
-    let show_names = Arc::new(AtomicBool::new(settings.tray_names));
+    // At least one of names/icons is shown.
+    let show_names = Arc::new(AtomicBool::new(settings.tray_names || !settings.tray_icons));
+    let show_icons = Arc::new(AtomicBool::new(settings.tray_icons));
     let selection = Arc::new(std::sync::Mutex::new(items.clone()));
     let spawn_all = |source_text: &str| -> Vec<ksni::blocking::Handle<NysmTray>> {
         let mut handles = Vec::new();
@@ -853,6 +897,7 @@ fn main() {
                 rate: settings.rate_unit,
                 show_label,
                 show_names: show_names.clone(),
+                show_icons: show_icons.clone(),
                 quit: quit.clone(),
                 host_back: host_back.clone(),
                 selection: selection.clone(),
@@ -903,7 +948,10 @@ fn main() {
             if m != config_mtime {
                 config_mtime = m;
                 let (cfg, _) = nysm_config::load_or_default(path.as_deref());
-                if show_names.swap(cfg.tray_names, Ordering::SeqCst) != cfg.tray_names {
+                let names = cfg.tray_names || !cfg.tray_icons;
+                if show_names.swap(names, Ordering::SeqCst) != names
+                    || show_icons.swap(cfg.tray_icons, Ordering::SeqCst) != cfg.tray_icons
+                {
                     reselect.store(true, Ordering::SeqCst);
                 }
                 if let Some(want) = Item::parse_list(&cfg.tray_items)

@@ -121,6 +121,8 @@ pub struct Display {
     pub tray_items: String,
     /// Tray: short names before values ("CPU 24%", "RAM 6.2G", "Disk 87%").
     pub tray_names: bool,
+    /// Tray: icons before values. Names or icons (or both) are shown.
+    pub tray_icons: bool,
 }
 
 impl Default for Display {
@@ -132,6 +134,7 @@ impl Default for Display {
             container_names: false,
             tray_items: "cpu,mem,net,storage,disk".into(),
             tray_names: true,
+            tray_icons: true,
         }
     }
 }
@@ -181,6 +184,7 @@ pub struct Settings {
     pub container_names: bool,
     pub tray_items: String,
     pub tray_names: bool,
+    pub tray_icons: bool,
     pub rules: Vec<Rule>,
     pub incidents: IncidentSettings,
 }
@@ -325,6 +329,7 @@ impl Config {
             container_names: self.display.container_names,
             tray_items: self.display.tray_items.clone(),
             tray_names: self.display.tray_names,
+            tray_icons: self.display.tray_icons,
             rules,
             incidents: IncidentSettings {
                 enabled: self.incidents.enabled,
