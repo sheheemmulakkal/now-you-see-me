@@ -111,7 +111,7 @@ mod tests {
         // only ~60 % of the configured history.
         let h = History::new(600, history_bytes(600));
         assert_eq!(h.capacity(), 600);
-        assert!(max_history_samples() >= 24 * 3600 + 1, "a day at 1 s fits");
+        assert!(max_history_samples() > 24 * 3600, "a day at 1 s fits");
     }
 
     fn point(seq: u64) -> HistoryPoint {
