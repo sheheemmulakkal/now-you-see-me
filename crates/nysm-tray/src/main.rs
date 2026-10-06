@@ -483,6 +483,104 @@ impl NysmTray {
         }
     }
 
+    /// "Top bar" submenu: what to show, how, and what the labels mean.
+    fn top_bar_menu(&self) -> MenuItem<Self> {
+        let info = |label: &str| -> MenuItem<Self> {
+            StandardItem {
+                label: menu_text(label),
+                enabled: false,
+                ..Default::default()
+            }
+            .into()
+        };
+        let chosen = self.selection.lock().map(|v| v.clone()).unwrap_or_default();
+        let mut sub: Vec<MenuItem<Self>> = CHOICES
+            .iter()
+            .map(|&c| {
+                // The last shown item cannot be turned off, so the tray
+                // never disappears; say so instead of a dead click.
+                let only = chosen.len() == 1 && chosen.contains(&c);
+                CheckmarkItem {
+                    label: if only {
+                        format!("{} (always one shown)", c.menu_label())
+                    } else {
+                        c.menu_label().into()
+                    },
+                    enabled: !only,
+                    checked: chosen.contains(&c),
+                    activate: Box::new(move |t: &mut Self| t.toggle(c)),
+                    ..Default::default()
+                }
+                .into()
+            })
+            .collect();
+        let (names, icons) = (
+            self.show_names.load(Ordering::Relaxed),
+            self.show_icons.load(Ordering::Relaxed),
+        );
+        sub.push(MenuItem::Separator);
+        sub.push(
+            CheckmarkItem {
+                label: "Show icons".into(),
+                checked: icons,
+                // The last of names/icons cannot be turned off.
+                enabled: names || !icons,
+                activate: Box::new(|t: &mut Self| t.toggle_icons()),
+                ..Default::default()
+            }
+            .into(),
+        );
+        sub.push(
+            CheckmarkItem {
+                label: "Show names".into(),
+                checked: names,
+                enabled: icons || !names,
+                activate: Box::new(|t: &mut Self| t.toggle_names()),
+                ..Default::default()
+            }
+            .into(),
+        );
+        sub.push(
+            CheckmarkItem {
+                label: "One compact strip".into(),
+                checked: self.item == Item::Strip,
+                activate: Box::new(|t: &mut Self| {
+                    let v = if t.item == Item::Strip {
+                        "items"
+                    } else {
+                        "strip"
+                    };
+                    if let Some(p) = nysm_config::default_path()
+                        && let Err(e) = nysm_config::set_many(&p, &[("display.tray_layout", v)])
+                    {
+                        eprintln!("nysm-tray: choice not saved: {e}");
+                    }
+                }),
+                ..Default::default()
+            }
+            .into(),
+        );
+        sub.push(MenuItem::Separator);
+        for l in [
+            "CPU — usage of all cores",
+            "RAM — memory in use",
+            "↓ ↑ — network download / upload",
+            "Disk — storage used on /",
+            "I/O — how busy the disk is",
+            "R / W — disk read / write per second",
+        ] {
+            sub.push(info(l));
+        }
+        sub.push(MenuItem::Separator);
+        sub.push(info(&self.source));
+        SubMenu {
+            label: "Top bar".into(),
+            submenu: sub,
+            ..Default::default()
+        }
+        .into()
+    }
+
     /// What this item shows, for the top of its menu.
     fn heading(&self) -> String {
         let s = self.snap.as_deref();
@@ -497,7 +595,7 @@ impl NysmTray {
             Item::Network => "Network: ↓ download  ↑ upload, per second".into(),
             Item::Storage => match s.and_then(root_fs) {
                 Some(f) => format!(
-                    "Disk: storage used on / — {} of {}, {} free",
+                    "Disk: storage used on / ({} of {}, {} free)",
                     units::bytes(f.used_bytes as f64),
                     units::bytes(f.total_bytes as f64),
                     units::bytes(f.available_bytes as f64)
@@ -566,94 +664,68 @@ impl NysmTray {
         }
     }
 
+    /// The menu's value lines: short, so the menu stays narrow.
     fn lines(&self) -> Vec<String> {
         let Some(s) = &self.snap else {
             return vec!["Collecting…".into()];
         };
         let rate = |v: f64| units::rate(v, self.rate);
+        let b = |v: u64| units::bytes(v as f64);
         let cores = s.cpu.logical_cores.value.unwrap_or(0);
         let mut out = vec![
-            format!(
-                "CPU {}",
-                s.cpu.usage.live().map_or("—".into(), |c| format!(
-                    "{:.1}% of {cores} cores",
-                    c.total_pct
-                ))
-            ),
-            format!(
-                "Memory {}",
-                s.memory.usage.live().map_or("—".into(), |m| format!(
-                    "{} of {} ({:.0}%), {} available",
-                    units::bytes(m.used_bytes as f64),
-                    units::bytes(m.total_bytes as f64),
-                    m.used_pct,
-                    units::bytes(m.available_bytes as f64)
-                ))
-            ),
-            format!(
-                "Network ↓ {}  ↑ {}",
-                s.network
-                    .total
-                    .live()
-                    .map_or("—".into(), |n| rate(n.rx_bytes_per_s)),
-                s.network
-                    .total
-                    .live()
-                    .map_or("—".into(), |n| rate(n.tx_bytes_per_s))
-            ),
-            match root_fs(s) {
-                Some(f) => format!(
-                    "Storage / {} of {} ({:.0}%), {} free{}",
-                    units::bytes(f.used_bytes as f64),
-                    units::bytes(f.total_bytes as f64),
-                    f.used_pct,
-                    units::bytes(f.available_bytes as f64),
-                    match (f.growth_bytes_per_hour, f.full_in_hours) {
-                        (Some(g), Some(h)) if g > 1024.0 * 1024.0 && h < 24.0 * 14.0 =>
-                            format!(" · full in ~{} at this rate", units::duration_s(h * 3600.0)),
-                        _ => String::new(),
+            s.cpu.usage.live().map_or("CPU —".into(), |c| {
+                format!("CPU {:.0}% of {cores} cores", c.total_pct)
+            }),
+            s.memory.usage.live().map_or("Memory —".into(), |m| {
+                format!(
+                    "Memory {} of {} · {} free",
+                    b(m.used_bytes),
+                    b(m.total_bytes),
+                    b(m.available_bytes)
+                )
+            }),
+            s.network.total.live().map_or("Network —".into(), |n| {
+                format!(
+                    "Network ↓ {} · ↑ {}",
+                    rate(n.rx_bytes_per_s),
+                    rate(n.tx_bytes_per_s)
+                )
+            }),
+            root_fs(s).map_or("Storage —".into(), |f| {
+                let full = match (f.growth_bytes_per_hour, f.full_in_hours) {
+                    (Some(g), Some(h)) if g > 1024.0 * 1024.0 && h < 24.0 * 14.0 => {
+                        if h < 48.0 {
+                            format!(" · full in ~{h:.0} h")
+                        } else {
+                            format!(" · full in ~{:.0} days", h / 24.0)
+                        }
                     }
-                ),
-                None => "Storage / —".into(),
-            },
+                    _ => String::new(),
+                };
+                format!(
+                    "Storage {} of {} ({:.0}%){full}",
+                    b(f.used_bytes),
+                    b(f.total_bytes),
+                    f.used_pct
+                )
+            }),
+            s.storage.total_io.live().map_or("Disk —".into(), |d| {
+                format!(
+                    "Disk read {} · write {}{}",
+                    units::rate(d.read_bytes_per_s, RateUnit::Bytes),
+                    units::rate(d.write_bytes_per_s, RateUnit::Bytes),
+                    disk_busy(s).map_or(String::new(), |b| format!(" · {b:.0}% busy"))
+                )
+            }),
             format!(
-                "Disk read {}  write {}{}",
-                s.storage
-                    .total_io
-                    .live()
-                    .map_or("—".into(), |d| units::rate(
-                        d.read_bytes_per_s,
-                        RateUnit::Bytes
-                    )),
-                s.storage
-                    .total_io
-                    .live()
-                    .map_or("—".into(), |d| units::rate(
-                        d.write_bytes_per_s,
-                        RateUnit::Bytes
-                    )),
-                disk_busy(s).map_or(String::new(), |b| format!(" · {b:.0}% active"))
-            ),
-            format!(
-                "Load {} · pressure cpu {} mem {} io {}",
-                s.cpu
-                    .load
-                    .live()
-                    .map_or("—".into(), |l| format!("{:.2}", l.one)),
+                "Waiting: cpu {} · mem {} · io {}",
                 psi(&s.cpu.pressure),
                 psi(&s.memory.pressure),
                 psi(&s.storage.io_pressure)
             ),
         ];
-        if let Some(v) = s.sensors.value.as_ref()
-            && !v.temperatures.is_empty()
-        {
-            let parts: Vec<String> = v
-                .summary()
-                .iter()
-                .map(|(c, t)| format!("{} {t:.0} °C", c.label()))
-                .collect();
-            out.push(format!("Temperature {}", parts.join(" · ")));
+        if let Some(t) = s.sensors.value.as_ref().and_then(|v| v.cpu_temperature()) {
+            out.push(format!("CPU temperature {:.0} °C", t.celsius));
         }
         if self.stale {
             out.push("Not updating — values are stale".into());
@@ -769,8 +841,12 @@ impl ksni::Tray for NysmTray {
             }
             .into()
         };
-        // Ubuntu shows no tooltips, so the menu says which item this is.
-        let mut items: Vec<MenuItem<Self>> = vec![info(self.heading()), MenuItem::Separator];
+        let mut items: Vec<MenuItem<Self>> = Vec::new();
+        // Ubuntu shows no tooltips, so a single-value item says what it is.
+        if !matches!(self.item, Item::Strip | Item::Meter) {
+            items.push(info(self.heading()));
+            items.push(MenuItem::Separator);
+        }
         items.extend(self.lines().into_iter().map(info));
         if !self.firing.is_empty() {
             items.push(MenuItem::Separator);
@@ -779,80 +855,6 @@ impl ksni::Tray for NysmTray {
             }
         }
         items.push(MenuItem::Separator);
-        let chosen = self.selection.lock().map(|v| v.clone()).unwrap_or_default();
-        items.push(
-            SubMenu {
-                label: "Show in top bar".into(),
-                submenu: CHOICES
-                    .iter()
-                    .map(|&c| {
-                        // The last shown item cannot be turned off, so the
-                        // tray never disappears; say so instead of a dead click.
-                        let only = chosen.len() == 1 && chosen.contains(&c);
-                        CheckmarkItem {
-                            label: if only {
-                                format!("{} (always one shown)", c.menu_label())
-                            } else {
-                                c.menu_label().into()
-                            },
-                            enabled: !only,
-                            checked: chosen.contains(&c),
-                            activate: Box::new(move |t: &mut Self| t.toggle(c)),
-                            ..Default::default()
-                        }
-                        .into()
-                    })
-                    .collect(),
-                ..Default::default()
-            }
-            .into(),
-        );
-        let (names, icons) = (
-            self.show_names.load(Ordering::Relaxed),
-            self.show_icons.load(Ordering::Relaxed),
-        );
-        items.push(
-            CheckmarkItem {
-                label: "Show icons".into(),
-                checked: icons,
-                // The last of names/icons cannot be turned off.
-                enabled: names || !icons,
-                activate: Box::new(|t: &mut Self| t.toggle_icons()),
-                ..Default::default()
-            }
-            .into(),
-        );
-        items.push(
-            CheckmarkItem {
-                label: "Show names (CPU, RAM, Disk, I/O)".into(),
-                checked: names,
-                enabled: icons || !names,
-                activate: Box::new(|t: &mut Self| t.toggle_names()),
-                ..Default::default()
-            }
-            .into(),
-        );
-        items.push(
-            CheckmarkItem {
-                label: "One compact strip (GNOME)".into(),
-                checked: self.item == Item::Strip,
-                activate: Box::new(|t: &mut Self| {
-                    let v = if t.item == Item::Strip {
-                        "items"
-                    } else {
-                        "strip"
-                    };
-                    if let Some(p) = nysm_config::default_path()
-                        && let Err(e) = nysm_config::set_many(&p, &[("display.tray_layout", v)])
-                    {
-                        eprintln!("nysm-tray: choice not saved: {e}");
-                    }
-                }),
-                ..Default::default()
-            }
-            .into(),
-        );
-        items.push(info(self.source.clone()));
         items.push(
             StandardItem {
                 label: "Open monitor".into(),
@@ -861,6 +863,7 @@ impl ksni::Tray for NysmTray {
             }
             .into(),
         );
+        items.push(self.top_bar_menu());
         items.push(
             StandardItem {
                 label: "Quit".into(),
