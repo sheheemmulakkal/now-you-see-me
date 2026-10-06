@@ -55,6 +55,22 @@ update, which made both setups cost the same (1.00 %); sending tables only
 when they change fixed that. Attached clients use ~1.5 MiB more RSS for
 frame buffers.
 
+### High process count, 2026-10-06
+3,000 idle `sleep` processes added (3,483 total), release build:
+
+| measure | ~485 processes | ~3,483 processes |
+| --- | --- | --- |
+| process scan (`bench_scan` example) | 9.2 ms | 70.8 ms (~20 µs/process, linear) |
+| TUI on the Processes view, CPU % of one core | ~0.5 | 2.9 |
+| TUI RSS | 5.6 MiB | 8 MiB |
+| key press → redraw latency (20 presses) | — | median < 1 ms, max 3 ms |
+
+Collection runs on its own thread, so input stays responsive regardless of
+scan time; the scan runs every 2 s and only while processes are
+subscribed. A blocked slow provider (e.g. a hung network mount) is covered
+by the `SlowWorker` unit test (callers never wait on it); a real hung
+mount was not reproduced because that needs root.
+
 ### Long-run (soak) observation, 2026-10-06
 Processes left running on the reference machine during normal use (heavy
 background load; clients attaching and detaching during testing):
