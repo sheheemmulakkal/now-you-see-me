@@ -90,6 +90,13 @@ now a virtualized GtkColumnView: every process is listed (no 200-row cap),
 only the visible rows have widgets, and a refresh updates their text in
 place, so scroll position and selection are kept.
 
+## About page
+Sidebar → About explains the parts (and which are running now), how data is
+collected, how history works, privacy, files and licence, and shows **what
+the app costs right now**: CPU and resident memory of each nysm process (the
+collector, the tray, every open window) from the live process table, next to
+the reference measurements.
+
 ## History length
 Settings → *Keep history for* takes any number of minutes. Below it the app
 shows what that costs (samples, memory in the collector and in each open

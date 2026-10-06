@@ -528,7 +528,10 @@ fn remove_stale_temps(path: &Path) {
     };
     for e in rd.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        let Some(pid) = name.strip_prefix(&prefix).and_then(|p| p.parse::<u32>().ok()) else {
+        let Some(pid) = name
+            .strip_prefix(&prefix)
+            .and_then(|p| p.parse::<u32>().ok())
+        else {
             continue;
         };
         let alive = cfg!(unix) && Path::new(&format!("/proc/{pid}")).exists();

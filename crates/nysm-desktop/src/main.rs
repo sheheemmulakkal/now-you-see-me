@@ -2,6 +2,7 @@
 //! service when it is running, otherwise an embedded collector. All values
 //! and formulas come from `nysm-core`; this crate only presents them.
 
+mod about;
 mod chart;
 mod pages;
 mod proctable;
@@ -49,7 +50,7 @@ window.warm .card { background-color: #ffffff; border-color: rgba(0, 0, 0, 0.07)
 window.warm .sidebar { background-color: #f1ede6; }
 ";
 
-const PAGES: [(&str, &str, &str); 7] = [
+const PAGES: [(&str, &str, &str); 8] = [
     ("overview", "Overview", "view-grid-symbolic"),
     ("cpu", "CPU", "utilities-system-monitor-symbolic"),
     ("memory", "Memory", "media-flash-symbolic"),
@@ -61,6 +62,7 @@ const PAGES: [(&str, &str, &str); 7] = [
         "application-x-executable-symbolic",
     ),
     ("processes", "Processes", "view-list-symbolic"),
+    ("about", "About", "help-about-symbolic"),
 ];
 
 /// Chart ranges offered (seconds); those longer than the kept history are
@@ -464,6 +466,11 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
         source_label(&source),
         settings.container_names,
     );
+    let about = Rc::new(about::build(
+        &pages::page(&stack, "about", "About"),
+        settings.history,
+        settings.interval,
+    ));
     let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     body.append(&sidebar(&stack));
     body.append(&stack);
@@ -489,16 +496,25 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
         });
     }
     {
-        let (state, ui, window, status, alert_badge, settings) = (
+        let (state, ui, window, status, alert_badge, settings, about) = (
             state.clone(),
             ui.clone(),
             window.clone(),
             status.clone(),
             alert_badge.clone(),
             settings.clone(),
+            about.clone(),
         );
         glib::timeout_add_local(Duration::from_millis(250), move || {
-            tick(&state, &ui, &window, &status, &alert_badge, &settings);
+            tick(
+                &state,
+                &ui,
+                &about,
+                &window,
+                &status,
+                &alert_badge,
+                &settings,
+            );
             glib::ControlFlow::Continue
         });
     }
@@ -599,6 +615,7 @@ fn window_hidden(window: &gtk::ApplicationWindow) -> bool {
 fn tick(
     state: &Rc<RefCell<Loop>>,
     ui: &pages::Pages,
+    about: &about::About,
     window: &gtk::ApplicationWindow,
     status: &gtk::Label,
     alert_badge: &gtk::Label,
@@ -663,6 +680,9 @@ fn tick(
     ));
     let visible = ui.visible_page();
     ui.update(&snap, &history, &alerts, &pinned, &visible);
+    if visible == "about" {
+        about.update(&snap, st.source.is_remote());
+    }
 }
 
 fn screenshot(window: &gtk::ApplicationWindow, path: &std::path::Path) -> Result<(), String> {

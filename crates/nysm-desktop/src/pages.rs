@@ -180,7 +180,7 @@ fn span_s(h: &[HistoryPoint]) -> f64 {
     }
 }
 
-fn page(stack: &gtk::Stack, name: &str, title: &str) -> gtk::Box {
+pub(crate) fn page(stack: &gtk::Stack, name: &str, title: &str) -> gtk::Box {
     let b = gtk::Box::new(gtk::Orientation::Vertical, 14);
     b.set_margin_top(18);
     b.set_margin_bottom(18);
