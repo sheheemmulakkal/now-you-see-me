@@ -226,6 +226,44 @@ pub fn sum_network<'a>(items: impl IntoIterator<Item = &'a NetworkRates>) -> Net
     t
 }
 
+/// Minimum observation window before a growth trend is reported.
+pub const MIN_GROWTH_WINDOW_MS: i64 = 120_000;
+
+/// Trend of used bytes over time, in bytes per hour: the Theil–Sen
+/// estimator (median of pairwise slopes), so a one-off step such as a
+/// cleanup or a single large download does not dominate the rate.
+/// `samples` are (unix ms, used bytes), oldest first.
+pub fn growth_per_hour(samples: &[(i64, u64)]) -> Option<f64> {
+    let (first, last) = (samples.first()?, samples.last()?);
+    if samples.len() < 3 || last.0 - first.0 < MIN_GROWTH_WINDOW_MS {
+        return None;
+    }
+    let mut slopes = Vec::with_capacity(samples.len() * (samples.len() - 1) / 2);
+    for (i, (ta, ua)) in samples.iter().enumerate() {
+        for (tb, ub) in &samples[i + 1..] {
+            if tb > ta {
+                let hours = (tb - ta) as f64 / 3_600_000.0;
+                slopes.push((*ub as f64 - *ua as f64) / hours);
+            }
+        }
+    }
+    if slopes.is_empty() {
+        return None;
+    }
+    slopes.sort_by(f64::total_cmp);
+    let m = slopes.len() / 2;
+    Some(if slopes.len().is_multiple_of(2) {
+        (slopes[m - 1] + slopes[m]) / 2.0
+    } else {
+        slopes[m]
+    })
+}
+
+/// Hours until `available` is used up at `rate` bytes/hour (None if not filling).
+pub fn hours_until_full(available: u64, rate: f64) -> Option<f64> {
+    (rate > 0.0).then(|| available as f64 / rate)
+}
+
 /// cgroup CPU as a share of the whole machine from `usage_usec` deltas.
 pub fn cgroup_cpu_pct(delta_usec: u64, elapsed: Duration, logical_cores: u32) -> Option<f64> {
     if elapsed < MIN_RATE_INTERVAL || logical_cores == 0 {
@@ -242,6 +280,42 @@ pub fn stall_pct(prev_us: u64, cur_us: u64, elapsed: Duration) -> Option<f64> {
     }
     let d = counter_delta(prev_us, cur_us)?;
     Some((d as f64 / (elapsed.as_secs_f64() * 1e6) * 100.0).clamp(0.0, 100.0))
+}
+
+#[cfg(test)]
+mod growth_tests {
+    use super::*;
+
+    #[test]
+    fn growth_needs_window_and_fits_trend() {
+        let mb = 1_000_000u64;
+        // 1 MB per minute for 5 minutes = 60 MB/hour.
+        let s: Vec<(i64, u64)> = (0..=5)
+            .map(|m| (m * 60_000, 1000 * mb + m as u64 * mb))
+            .collect();
+        let g = growth_per_hour(&s).unwrap();
+        assert!((g - 60.0 * mb as f64).abs() < 1.0, "{g}");
+        assert_eq!(hours_until_full(120 * mb, g).map(|h| h.round()), Some(2.0));
+        // Too short a window: no trend.
+        assert!(growth_per_hour(&s[..2]).is_none());
+        assert!(growth_per_hour(&[(0, 1), (60_000, 2), (90_000, 3)]).is_none());
+        // Shrinking usage: negative rate, never "full".
+        let down: Vec<(i64, u64)> = (0..=5)
+            .map(|m| (m * 60_000, 1000 * mb - m as u64 * mb))
+            .collect();
+        assert!(growth_per_hour(&down).unwrap() < 0.0);
+        // Steady growth with one large cleanup in the middle: the trend
+        // stays the steady rate instead of turning sharply negative.
+        let step: Vec<(i64, u64)> = (0..30)
+            .map(|i| {
+                let freed = if i >= 10 { 2000 * mb } else { 0 };
+                (i * 5_000, 10_000 * mb + i as u64 * 5 * mb - freed)
+            })
+            .collect();
+        let g = growth_per_hour(&step).unwrap();
+        assert!((g - 3600.0 * mb as f64).abs() < 1.0, "{g}");
+        assert_eq!(hours_until_full(10, -5.0), None);
+    }
 }
 
 #[cfg(test)]

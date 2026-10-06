@@ -1239,13 +1239,30 @@ impl Pages {
             b.append(&lb);
             let detail = label(
                 &format!(
-                    "{} / {} ({:.0}%) · {} free · {}{}",
+                    "{} / {} ({:.0}%) · {} free · {}{}{}",
                     units::bytes(f.used_bytes as f64),
                     units::bytes(f.total_bytes as f64),
                     f.used_pct,
                     units::bytes(f.available_bytes as f64),
                     safe(&f.fs_type),
-                    if f.read_only { " · read-only" } else { "" }
+                    if f.read_only { " · read-only" } else { "" },
+                    match (f.growth_bytes_per_hour, f.full_in_hours) {
+                        (Some(g), Some(h)) if g > 1024.0 * 1024.0 && h < 24.0 * 14.0 => {
+                            format!(
+                                " · +{}/h, full in ~{} at this rate",
+                                units::bytes(g),
+                                units::duration_s(h * 3600.0)
+                            )
+                        }
+                        (Some(g), _) if g.abs() >= 1024.0 * 1024.0 => {
+                            format!(
+                                " · {}{}/h",
+                                if g > 0.0 { "+" } else { "-" },
+                                units::bytes(g.abs())
+                            )
+                        }
+                        _ => String::new(),
+                    }
                 ),
                 &["numeric"],
             );

@@ -53,6 +53,7 @@ Legend: ✅ done and verified · 🟡 partial · ⬜ not started
 - ⬜ aarch64 builds, signed releases, apt repository; licence decision (owner)
 
 - ✅ Network diagnostics (`net check`) and storage scan (`disk usage`), on demand (docs/diagnostics.md)
+- ✅ Filesystem growth trend and time-to-full projection (TUI Disk TREND column, desktop volumes, JSON)
 
 ## Milestone 5: broader graphical access
 - 🟡 GUI strategy for macOS/Windows proposed (ADR 0009: tray/menu-bar first, then evaluate Slint)

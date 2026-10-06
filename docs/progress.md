@@ -2,6 +2,17 @@
 
 Read this first when resuming. Newest entry on top.
 
+## 2026-10-06 — on-demand diagnostics and storage growth
+
+- `nysm net check HOST[:PORT]` (DNS + TCP connect latency, no ICMP) and
+  `nysm disk usage PATH` (bounded, cancellable scan), docs/diagnostics.md.
+- Filesystem growth trend + time-to-full projection (Theil–Sen over the
+  15 s capacity refreshes; shown after 2 min). Live check: a 1 MiB/s writer
+  read as ~3.4 GiB/h even though another process freed 2 GB mid-run, which
+  had pushed a least-squares fit to −73 GB/h. That is why the estimator is
+  robust.
+- SSH remote testing on real hardware paused (no second machine).
+
 ## 2026-10-06 — paused by the user (resume here)
 
 Done since last entry: optional systemd provider (`services` STATE column,

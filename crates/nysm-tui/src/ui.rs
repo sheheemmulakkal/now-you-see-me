@@ -1584,10 +1584,14 @@ fn draw_disk(f: &mut Frame, area: Rect, _app: &mut App, s: &Snapshot, t: &Theme)
                 Cell::from(units::bytes(fs.available_bytes as f64)),
                 Cell::from(units::bytes(fs.total_bytes as f64)),
                 Cell::from(if fs.read_only { "ro" } else { "" }),
+                Cell::from(trend_text(fs)),
             ])
         })
         .collect();
-    let header = Row::new(["MOUNT", "TYPE", "USED %", "USED", "AVAIL", "SIZE", ""]).style(t.bold());
+    let header = Row::new([
+        "MOUNT", "TYPE", "USED %", "USED", "AVAIL", "SIZE", "", "TREND",
+    ])
+    .style(t.bold());
     let widths = [
         Constraint::Length(20),
         Constraint::Length(6),
@@ -1596,6 +1600,7 @@ fn draw_disk(f: &mut Frame, area: Rect, _app: &mut App, s: &Snapshot, t: &Theme)
         Constraint::Length(9),
         Constraint::Length(9),
         Constraint::Length(2),
+        Constraint::Min(10),
     ];
     let title =
         format!(" Filesystems{stale} · available = space a normal user can still allocate ");
@@ -1611,6 +1616,21 @@ fn draw_disk(f: &mut Frame, area: Rect, _app: &mut App, s: &Snapshot, t: &Theme)
                 .block(t.block("").title(title)),
             ft,
         );
+    }
+}
+
+/// "+120 MiB/h, full in ~3 h" (projection) or "stable" / "collecting…".
+fn trend_text(fs: &nysm_core::snapshot::FilesystemSnapshot) -> String {
+    match (fs.growth_bytes_per_hour, fs.full_in_hours) {
+        (None, _) => "collecting…".into(),
+        (Some(g), _) if g.abs() < 1024.0 * 1024.0 => "stable".into(),
+        (Some(g), Some(h)) if h < 24.0 * 14.0 => format!(
+            "+{}/h, full in ~{}",
+            units::bytes(g),
+            units::duration_s(h * 3600.0)
+        ),
+        (Some(g), _) if g > 0.0 => format!("+{}/h", units::bytes(g)),
+        (Some(g), _) => format!("-{}/h", units::bytes(-g)),
     }
 }
 

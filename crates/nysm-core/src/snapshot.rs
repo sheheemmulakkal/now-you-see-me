@@ -287,6 +287,13 @@ pub struct FilesystemSnapshot {
     /// Additional mount points of the same filesystem (bind mounts etc).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub also_mounted_at: Vec<String>,
+    /// Trend of used space over the observed window (≥ 2 min), bytes/hour;
+    /// negative when space is being freed. Absent until enough data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub growth_bytes_per_hour: Option<f64>,
+    /// Hours until full if the observed trend continued (projection only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_in_hours: Option<f64>,
 }
 
 // ---------------------------------------------------------------- Processes

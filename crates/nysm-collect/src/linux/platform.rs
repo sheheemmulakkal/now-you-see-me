@@ -994,6 +994,8 @@ impl FilesystemProvider for LinuxFilesystems {
                         used as f64 / denom as f64 * 100.0
                     },
                     also_mounted_at: Vec::new(),
+                    growth_bytes_per_hour: None,
+                    full_in_hours: None,
                 },
             ));
         }

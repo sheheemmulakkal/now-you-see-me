@@ -31,6 +31,8 @@ fn fs(mount: &str, used_pct: f64, ro: bool) -> FilesystemSnapshot {
         available_bytes: 100 - used_pct as u64,
         used_pct,
         also_mounted_at: vec![],
+        growth_bytes_per_hour: None,
+        full_in_hours: None,
     }
 }
 

@@ -105,6 +105,8 @@ pub struct Engine {
     cgs: CgState,
     fs: Option<SlowWorker<Vec<FilesystemSnapshot>>>,
     sensors: Option<SlowWorker<SensorsSnapshot>>,
+    /// Per mount point: (refresh time, used bytes), bounded.
+    fs_growth: HashMap<String, std::collections::VecDeque<(i64, u64)>>,
     history: History,
     pins: ProcessHistory,
 }
@@ -164,6 +166,7 @@ impl Engine {
             cgs: CgState::default(),
             fs,
             sensors,
+            fs_growth: HashMap::new(),
             history,
             pins,
         }
@@ -596,6 +599,35 @@ impl Engine {
                     Some(age.as_millis() as u64),
                 ),
             },
+        };
+        // Growth trend from successive capacity refreshes (one sample per
+        // refresh, keyed by when that refresh happened).
+        let filesystems = match (filesystems_age_ms, filesystems) {
+            (Some(age), mut r) => {
+                let refreshed_at = wall_ms() - age as i64;
+                if let Some(v) = r.value.as_mut() {
+                    const MAX_POINTS: usize = 240; // ~1 h at 15 s
+                    self.fs_growth
+                        .retain(|k, _| v.iter().any(|f| &f.mount_point == k));
+                    for f in v.iter_mut() {
+                        let q = self.fs_growth.entry(f.mount_point.clone()).or_default();
+                        // Same refresh seen again: allow a little clock jitter.
+                        if q.back().is_none_or(|(t, _)| refreshed_at - t > 1000) {
+                            if q.len() == MAX_POINTS {
+                                q.pop_front();
+                            }
+                            q.push_back((refreshed_at, f.used_bytes));
+                        }
+                        let pts: Vec<(i64, u64)> = q.iter().copied().collect();
+                        f.growth_bytes_per_hour = math::growth_per_hour(&pts);
+                        f.full_in_hours = f
+                            .growth_bytes_per_hour
+                            .and_then(|g| math::hours_until_full(f.available_bytes, g));
+                    }
+                }
+                r
+            }
+            (None, r) => r,
         };
         StorageSnapshot {
             devices,
