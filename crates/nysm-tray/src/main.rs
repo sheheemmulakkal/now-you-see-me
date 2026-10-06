@@ -136,9 +136,10 @@ struct NysmTray {
     rate: RateUnit,
     /// Show the text label next to the icon (Ayatana hosts, e.g. Ubuntu).
     show_label: bool,
-    /// Widest label shown so far (characters): labels are padded to it so
-    /// items never shrink and shift their neighbours ("sticky" width).
-    widest: std::cell::Cell<usize>,
+    /// Widest recent label (characters) and when it was last that wide:
+    /// labels are padded to it so items do not shrink and shift their
+    /// neighbours on every update; after `HOLD` it shrinks to fit.
+    widest: std::cell::Cell<(usize, Instant)>,
     quit: Arc<AtomicBool>,
     /// Set when the tray host comes back (e.g. after a screen lock), so the
     /// main loop can re-register all items in a stable order.
@@ -166,16 +167,11 @@ fn pad(s: &str, width: usize) -> String {
     out
 }
 
-/// U+2008 PUNCTUATION SPACE: as wide as a period.
-const PUNCT: char = '\u{2008}';
-
-/// Fixed-width compact value for the top bar: the width of three digits
-/// and a period, plus a one-letter unit, e.g. " 64K", "1.2M", "  0B".
-/// Whole numbers get a punctuation space so they are exactly as wide as
-/// "9.9"-style values.
+/// Compact value for the top bar: at most three digits and a one-letter
+/// unit, no padding: "64K", "1.2M", "0B".
 fn compact(v: f64, base: f64, units: &[&str]) -> String {
     if !v.is_finite() || v < 0.0 {
-        return pad("—", 5);
+        return "—".into();
     }
     let mut x = v;
     let mut i = 0;
@@ -184,13 +180,13 @@ fn compact(v: f64, base: f64, units: &[&str]) -> String {
         i += 1;
     }
     if i > 0 && x < 9.95 {
-        format!("{FIG}{x:.1}{}", units[i])
+        format!("{x:.1}{}", units[i])
     } else {
-        format!("{PUNCT}{}{}", pad(&format!("{x:.0}"), 3), units[i])
+        format!("{x:.0}{}", units[i])
     }
 }
 
-/// Bytes ("6.2G", " 15G") for memory.
+/// Bytes ("6.2G", "15G") for memory.
 fn short_bytes(n: f64) -> String {
     compact(n, 1024.0, &["B", "K", "M", "G", "T"])
 }
@@ -278,37 +274,32 @@ impl NysmTray {
             .cpu
             .usage
             .live()
-            .map_or(pad("—", 3), |c| pad(&format!("{:.0}", c.total_pct), 3))
-            + "%";
+            .map_or("—".into(), |c| format!("{:.0}%", c.total_pct));
         let mem = s
             .memory
             .usage
             .live()
-            .map_or(pad("—", 5), |m| short_bytes(m.used_bytes as f64));
+            .map_or("—".to_string(), |m| short_bytes(m.used_bytes as f64));
         let (rx, tx) = match s.network.total.live() {
             Some(n) => (
                 short_rate(n.rx_bytes_per_s, self.rate),
                 short_rate(n.tx_bytes_per_s, self.rate),
             ),
-            None => (pad("—", 5), pad("—", 5)),
+            None => ("—".to_string(), "—".to_string()),
         };
         match self.item {
             Item::Meter => format!("{cpu} · {mem} · ↓{rx} ↑{tx}"),
             Item::Cpu => cpu,
             Item::Memory => mem,
             Item::Network => format!("↓{rx} ↑{tx}"),
-            Item::Disk => {
-                disk_busy(s).map_or(pad("—", 3), |b| {
-                    pad(&format!("{b:.0}", b = b.min(100.0)), 3)
-                }) + "%"
-            }
+            Item::Disk => disk_busy(s).map_or("—".into(), |b| format!("{:.0}%", b.min(100.0))),
             Item::DiskIo => match s.storage.total_io.live() {
                 Some(d) => format!(
-                    "R{} W{}",
+                    "R {} W {}",
                     short_rate(d.read_bytes_per_s, RateUnit::Bytes),
                     short_rate(d.write_bytes_per_s, RateUnit::Bytes)
                 ),
-                None => format!("R{} W{}", pad("—", 5), pad("—", 5)),
+                None => "R — W —".into(),
             },
         }
     }
@@ -442,12 +433,17 @@ impl ksni::Tray for NysmTray {
         if !self.show_label {
             return String::new();
         }
+        const HOLD: Duration = Duration::from_secs(30);
         let text = self.label_text();
         let n = text.chars().count();
-        if n > self.widest.get() {
-            self.widest.set(n);
-        }
-        pad(&text, self.widest.get())
+        let (w, at) = self.widest.get();
+        let w = if n >= w || at.elapsed() >= HOLD {
+            self.widest.set((n, Instant::now()));
+            n
+        } else {
+            w
+        };
+        pad(&text, w)
     }
 
     fn label_guide(&self) -> String {
@@ -502,8 +498,16 @@ impl ksni::Tray for NysmTray {
                 submenu: CHOICES
                     .iter()
                     .map(|&c| {
+                        // The last shown item cannot be turned off, so the
+                        // tray never disappears; say so instead of a dead click.
+                        let only = chosen.len() == 1 && chosen.contains(&c);
                         CheckmarkItem {
-                            label: c.menu_label().into(),
+                            label: if only {
+                                format!("{} (always one shown)", c.menu_label())
+                            } else {
+                                c.menu_label().into()
+                            },
+                            enabled: !only,
                             checked: chosen.contains(&c),
                             activate: Box::new(move |t: &mut Self| t.toggle(c)),
                             ..Default::default()
@@ -672,7 +676,7 @@ fn main() {
                 source: source_text.to_string(),
                 rate: settings.rate_unit,
                 show_label,
-                widest: std::cell::Cell::new(0),
+                widest: std::cell::Cell::new((0, Instant::now())),
                 quit: quit.clone(),
                 host_back: host_back.clone(),
                 selection: selection.clone(),
@@ -804,20 +808,17 @@ mod tests {
     }
 
     #[test]
-    fn compact_values_have_constant_width() {
+    fn compact_values_are_short() {
         for v in [
             0.0, 5.0, 64.0, 999.0, 1000.0, 1536.0, 9.0e4, 1.2e6, 5.0e8, 3.0e9,
         ] {
-            assert_eq!(w(&short_rate(v, RateUnit::Bytes)), 5, "{v}");
-            assert_eq!(w(&short_rate(v, RateUnit::Bits)), 5, "{v}");
+            assert!(w(&short_rate(v, RateUnit::Bytes)) <= 4, "{v}");
+            assert!(w(&short_rate(v, RateUnit::Bits)) <= 4, "{v}");
         }
-        assert_eq!(short_rate(1536.0, RateUnit::Bytes), "\u{2007}1.5K");
-        assert_eq!(
-            short_rate(64.0 * 1024.0, RateUnit::Bytes),
-            "\u{2008}\u{2007}64K"
-        );
-        assert_eq!(short_rate(1000.0 * 1024.0, RateUnit::Bytes), "\u{2007}1.0M");
-        assert_eq!(short_bytes(9.6 * 1024.0 * 1024.0 * 1024.0), "\u{2007}9.6G");
+        assert_eq!(short_rate(1536.0, RateUnit::Bytes), "1.5K");
+        assert_eq!(short_rate(64.0 * 1024.0, RateUnit::Bytes), "64K");
+        assert_eq!(short_rate(1000.0 * 1024.0, RateUnit::Bytes), "1.0M");
+        assert_eq!(short_bytes(9.6 * 1024.0 * 1024.0 * 1024.0), "9.6G");
         assert_eq!(pad("5", 3), "\u{2007}\u{2007}5");
     }
 }
