@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use ksni::blocking::TrayMethods;
-use ksni::menu::StandardItem;
+use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
 use ksni::{MenuItem, ToolTip};
 use nysm_core::alerts::AlertState;
 use nysm_core::sanitize::for_terminal;
@@ -32,8 +32,20 @@ enum Item {
     Cpu,
     Memory,
     Network,
+    /// Busiest disk's activity (% of time busy).
     Disk,
+    /// Disk read and write rates.
+    DiskIo,
 }
+
+/// Items offered in the "Show in top bar" menu, in display order.
+const CHOICES: [Item; 5] = [
+    Item::Cpu,
+    Item::Memory,
+    Item::Network,
+    Item::Disk,
+    Item::DiskIo,
+];
 
 impl Item {
     fn parse(s: &str) -> Option<Item> {
@@ -42,8 +54,41 @@ impl Item {
             "mem" | "memory" => Item::Memory,
             "net" | "network" => Item::Network,
             "disk" => Item::Disk,
+            "diskio" => Item::DiskIo,
             _ => return None,
         })
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Item::Meter => "meter",
+            Item::Cpu => "cpu",
+            Item::Memory => "mem",
+            Item::Network => "net",
+            Item::Disk => "disk",
+            Item::DiskIo => "diskio",
+        }
+    }
+
+    fn menu_label(self) -> &'static str {
+        match self {
+            Item::Meter => "Meter",
+            Item::Cpu => "CPU usage",
+            Item::Memory => "Memory used",
+            Item::Network => "Network download / upload",
+            Item::Disk => "Disk activity (%)",
+            Item::DiskIo => "Disk read / write",
+        }
+    }
+
+    fn parse_list(list: &str) -> Option<Vec<Item>> {
+        let v: Option<Vec<Item>> = list
+            .split(',')
+            .map(str::trim)
+            .filter(|x| !x.is_empty())
+            .map(Item::parse)
+            .collect();
+        v.filter(|v| !v.is_empty())
     }
 
     fn id(self) -> String {
@@ -54,6 +99,7 @@ impl Item {
             Item::Memory => format!("{base}-memory"),
             Item::Network => format!("{base}-network"),
             Item::Disk => format!("{base}-disk"),
+            Item::DiskIo => format!("{base}-diskio"),
         }
     }
 
@@ -63,17 +109,18 @@ impl Item {
             Item::Cpu => glyphs::CPU,
             Item::Memory => glyphs::MEMORY,
             Item::Network => glyphs::NETWORK,
-            Item::Disk => glyphs::DISK,
+            Item::Disk | Item::DiskIo => glyphs::DISK,
         }
     }
 
     fn guide(self) -> &'static str {
         match self {
-            Item::Meter => "100% · 99.9G · ↓999 MiB/s ↑999 MiB/s",
+            Item::Meter => "100% · 999G · ↓999M ↑999M",
             Item::Cpu => "100%",
-            Item::Memory => "99.9G",
-            Item::Network => "↓999 MiB/s ↑999 MiB/s",
-            Item::Disk => "R 999 MiB/s W 999 MiB/s",
+            Item::Memory => "999G",
+            Item::Network => "↓999M ↑999M",
+            Item::Disk => "100%",
+            Item::DiskIo => "R999M W999M",
         }
     }
 }
@@ -89,18 +136,71 @@ struct NysmTray {
     rate: RateUnit,
     /// Show the text label next to the icon (Ayatana hosts, e.g. Ubuntu).
     show_label: bool,
+    /// Widest label shown so far (characters): labels are padded to it so
+    /// items never shrink and shift their neighbours ("sticky" width).
+    widest: std::cell::Cell<usize>,
     quit: Arc<AtomicBool>,
     /// Set when the tray host comes back (e.g. after a screen lock), so the
     /// main loop can re-register all items in a stable order.
     host_back: Arc<AtomicBool>,
+    /// Items chosen in the menu; `reselect` asks the main loop to apply.
+    selection: Arc<std::sync::Mutex<Vec<Item>>>,
+    reselect: Arc<AtomicBool>,
 }
 
-/// Compact size for the top bar: "6.2G", "512M".
+/// Activity of the busiest whole disk (the total carries it, so it is
+/// available on the service's lite feed too).
+fn disk_busy(s: &Snapshot) -> Option<f64> {
+    s.storage.total_io.live().and_then(|d| d.busy_pct)
+}
+
+/// U+2007 FIGURE SPACE: as wide as a digit, so padded numbers keep a
+/// constant width in the panel font.
+const FIG: char = '\u{2007}';
+
+/// Left-pad with figure spaces to `width` characters.
+fn pad(s: &str, width: usize) -> String {
+    let n = s.chars().count();
+    let mut out: String = std::iter::repeat_n(FIG, width.saturating_sub(n)).collect();
+    out.push_str(s);
+    out
+}
+
+/// U+2008 PUNCTUATION SPACE: as wide as a period.
+const PUNCT: char = '\u{2008}';
+
+/// Fixed-width compact value for the top bar: the width of three digits
+/// and a period, plus a one-letter unit, e.g. " 64K", "1.2M", "  0B".
+/// Whole numbers get a punctuation space so they are exactly as wide as
+/// "9.9"-style values.
+fn compact(v: f64, base: f64, units: &[&str]) -> String {
+    if !v.is_finite() || v < 0.0 {
+        return pad("—", 5);
+    }
+    let mut x = v;
+    let mut i = 0;
+    while x >= 999.5 && i < units.len() - 1 {
+        x /= base;
+        i += 1;
+    }
+    if i > 0 && x < 9.95 {
+        format!("{FIG}{x:.1}{}", units[i])
+    } else {
+        format!("{PUNCT}{}{}", pad(&format!("{x:.0}"), 3), units[i])
+    }
+}
+
+/// Bytes ("6.2G", " 15G") for memory.
 fn short_bytes(n: f64) -> String {
-    let s = units::bytes(n);
-    match s.split_once(' ') {
-        Some((v, unit)) => format!("{v}{}", &unit[..1]),
-        None => s,
+    compact(n, 1024.0, &["B", "K", "M", "G", "T"])
+}
+
+/// Per-second rate without "/s" (the tooltip and menu spell it out):
+/// bytes with binary prefixes, or bits with decimal prefixes.
+fn short_rate(bytes_per_s: f64, unit: RateUnit) -> String {
+    match unit {
+        RateUnit::Bytes => compact(bytes_per_s, 1024.0, &["B", "K", "M", "G"]),
+        RateUnit::Bits => compact(bytes_per_s * 8.0, 1000.0, &["b", "k", "M", "G"]),
     }
 }
 
@@ -118,6 +218,38 @@ fn psi(r: &Reading<Pressure>) -> String {
 }
 
 impl NysmTray {
+    /// Show or hide an item (menu). The last item cannot be removed. The
+    /// choice is saved as `display.tray_items` and applied by the main loop.
+    fn toggle(&self, item: Item) {
+        let Ok(mut sel) = self.selection.lock() else {
+            return;
+        };
+        let mut next = sel.clone();
+        if let Some(i) = next.iter().position(|x| *x == item) {
+            if next.len() == 1 {
+                return; // keep at least one item
+            }
+            next.remove(i);
+        } else {
+            // Insert before the first shown item that comes later in the
+            // menu order, so the bar keeps the menu's order.
+            let rank = |x: &Item| CHOICES.iter().position(|c| c == x).unwrap_or(usize::MAX);
+            let at = next
+                .iter()
+                .position(|x| rank(x) > rank(&item))
+                .unwrap_or(next.len());
+            next.insert(at, item);
+        }
+        *sel = next.clone();
+        let value: Vec<&str> = next.iter().map(|i| i.key()).collect();
+        if let Some(p) = nysm_config::default_path()
+            && let Err(e) = nysm_config::set_many(&p, &[("display.tray_items", &value.join(","))])
+        {
+            eprintln!("nysm-tray: choice not saved: {e}");
+        }
+        self.reselect.store(true, Ordering::SeqCst);
+    }
+
     /// Label for this item; "24% · 6.2G · ↓1.8 MiB/s ↑240 KiB/s" for the
     /// meter. Dashes for values not yet known.
     fn label_text(&self) -> String {
@@ -146,31 +278,37 @@ impl NysmTray {
             .cpu
             .usage
             .live()
-            .map_or("—".into(), |c| format!("{:.0}%", c.total_pct));
+            .map_or(pad("—", 3), |c| pad(&format!("{:.0}", c.total_pct), 3))
+            + "%";
         let mem = s
             .memory
             .usage
             .live()
-            .map_or("—".into(), |m| short_bytes(m.used_bytes as f64));
+            .map_or(pad("—", 5), |m| short_bytes(m.used_bytes as f64));
         let (rx, tx) = match s.network.total.live() {
             Some(n) => (
-                units::rate(n.rx_bytes_per_s, self.rate),
-                units::rate(n.tx_bytes_per_s, self.rate),
+                short_rate(n.rx_bytes_per_s, self.rate),
+                short_rate(n.tx_bytes_per_s, self.rate),
             ),
-            None => ("—".into(), "—".into()),
+            None => (pad("—", 5), pad("—", 5)),
         };
         match self.item {
             Item::Meter => format!("{cpu} · {mem} · ↓{rx} ↑{tx}"),
             Item::Cpu => cpu,
             Item::Memory => mem,
             Item::Network => format!("↓{rx} ↑{tx}"),
-            Item::Disk => match s.storage.total_io.live() {
+            Item::Disk => {
+                disk_busy(s).map_or(pad("—", 3), |b| {
+                    pad(&format!("{b:.0}", b = b.min(100.0)), 3)
+                }) + "%"
+            }
+            Item::DiskIo => match s.storage.total_io.live() {
                 Some(d) => format!(
-                    "R {} W {}",
-                    units::rate(d.read_bytes_per_s, RateUnit::Bytes),
-                    units::rate(d.write_bytes_per_s, RateUnit::Bytes)
+                    "R{} W{}",
+                    short_rate(d.read_bytes_per_s, RateUnit::Bytes),
+                    short_rate(d.write_bytes_per_s, RateUnit::Bytes)
                 ),
-                None => "R — W —".into(),
+                None => format!("R{} W{}", pad("—", 5), pad("—", 5)),
             },
         }
     }
@@ -211,7 +349,7 @@ impl NysmTray {
                     .map_or("—".into(), |n| rate(n.tx_bytes_per_s))
             ),
             format!(
-                "Disk read {}  write {}",
+                "Disk read {}  write {}{}",
                 s.storage
                     .total_io
                     .live()
@@ -225,7 +363,8 @@ impl NysmTray {
                     .map_or("—".into(), |d| units::rate(
                         d.write_bytes_per_s,
                         RateUnit::Bytes
-                    ))
+                    )),
+                disk_busy(s).map_or(String::new(), |b| format!(" · {b:.0}% active"))
             ),
             format!(
                 "Load {} · pressure cpu {} mem {} io {}",
@@ -300,11 +439,15 @@ impl ksni::Tray for NysmTray {
     }
 
     fn label(&self) -> String {
-        if self.show_label {
-            self.label_text()
-        } else {
-            String::new()
+        if !self.show_label {
+            return String::new();
         }
+        let text = self.label_text();
+        let n = text.chars().count();
+        if n > self.widest.get() {
+            self.widest.set(n);
+        }
+        pad(&text, self.widest.get())
     }
 
     fn label_guide(&self) -> String {
@@ -317,8 +460,9 @@ impl ksni::Tray for NysmTray {
     }
 
     fn tool_tip(&self) -> ToolTip {
+        // The same full summary on every item.
         let mut lines = self.lines();
-        lines.truncate(3);
+        lines.extend(self.firing.iter().map(|f| format!("⚠ {f}")));
         ToolTip {
             title: nysm_core::brand::PRODUCT_NAME.into(),
             description: lines.join("\n"),
@@ -351,6 +495,26 @@ impl ksni::Tray for NysmTray {
             }
         }
         items.push(MenuItem::Separator);
+        let chosen = self.selection.lock().map(|v| v.clone()).unwrap_or_default();
+        items.push(
+            SubMenu {
+                label: "Show in top bar".into(),
+                submenu: CHOICES
+                    .iter()
+                    .map(|&c| {
+                        CheckmarkItem {
+                            label: c.menu_label().into(),
+                            checked: chosen.contains(&c),
+                            activate: Box::new(move |t: &mut Self| t.toggle(c)),
+                            ..Default::default()
+                        }
+                        .into()
+                    })
+                    .collect(),
+                ..Default::default()
+            }
+            .into(),
+        );
         items.push(info(self.source.clone()));
         items.push(
             StandardItem {
@@ -416,10 +580,10 @@ fn update_all(handles: &[ksni::blocking::Handle<NysmTray>], f: &dyn Fn(&mut Nysm
 }
 
 fn main() {
-    const USAGE: &str = "usage: nysm-tray [--attach auto|never|require] [--items cpu,mem,net,disk] [--meter] [--no-label]";
+    const USAGE: &str = "usage: nysm-tray [--attach auto|never|require] [--items cpu,mem,net,disk,diskio] [--meter] [--no-label]";
     let mut attach = Attach::Auto;
     let mut show_label = true;
-    let mut items = vec![Item::Cpu, Item::Memory, Item::Network, Item::Disk];
+    let mut items: Option<Vec<Item>> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -428,7 +592,7 @@ fn main() {
                 continue;
             }
             "--meter" => {
-                items = vec![Item::Meter];
+                items = Some(vec![Item::Meter]);
                 continue;
             }
             "-h" | "--help" => {
@@ -441,23 +605,28 @@ fn main() {
             ("--attach", Some("auto")) => attach = Attach::Auto,
             ("--attach", Some("never")) => attach = Attach::Never,
             ("--attach", Some("require")) => attach = Attach::Require,
-            ("--items", Some(list)) => {
-                let parsed: Option<Vec<Item>> =
-                    list.split(',').map(|x| Item::parse(x.trim())).collect();
-                match parsed {
-                    Some(v) if !v.is_empty() => items = v,
-                    _ => {
-                        eprintln!("nysm-tray: --items takes cpu,mem,net,disk\n{USAGE}");
-                        std::process::exit(2);
-                    }
+            ("--items", Some(list)) => match Item::parse_list(list) {
+                Some(v) => items = Some(v),
+                None => {
+                    eprintln!("nysm-tray: --items takes cpu,mem,net,disk,diskio\n{USAGE}");
+                    std::process::exit(2);
                 }
-            }
+            },
             _ => {
                 eprintln!("{USAGE}");
                 std::process::exit(2);
             }
         }
     }
+    let path = nysm_config::default_path();
+    let (settings, err) = nysm_config::load_or_default(path.as_deref());
+    if let Some(e) = err {
+        eprintln!("nysm-tray: warning: ignoring invalid configuration, using defaults: {e}");
+    }
+    // Command line first, then the saved choice, then everything but diskio.
+    let mut items = items
+        .or_else(|| Item::parse_list(&settings.tray_items))
+        .unwrap_or_else(|| vec![Item::Cpu, Item::Memory, Item::Network, Item::Disk]);
     let icon_dir = if items.iter().any(|i| *i != Item::Meter) {
         match glyphs::install() {
             Some(d) => d.to_string_lossy().into_owned(),
@@ -470,11 +639,6 @@ fn main() {
     } else {
         String::new()
     };
-    let path = nysm_config::default_path();
-    let (settings, err) = nysm_config::load_or_default(path.as_deref());
-    if let Some(e) = err {
-        eprintln!("nysm-tray: warning: ignoring invalid configuration, using defaults: {e}");
-    }
     let client = concat!("nysm-tray/", env!("CARGO_PKG_VERSION"));
     let mut source = match Source::open_with(
         attach,
@@ -491,8 +655,11 @@ fn main() {
     };
     let quit = Arc::new(AtomicBool::new(false));
     let host_back = Arc::new(AtomicBool::new(false));
+    let reselect = Arc::new(AtomicBool::new(false));
+    let selection = Arc::new(std::sync::Mutex::new(items.clone()));
     let spawn_all = |source_text: &str| -> Vec<ksni::blocking::Handle<NysmTray>> {
         let mut handles = Vec::new();
+        let items = selection.lock().map(|v| v.clone()).unwrap_or_default();
         // Ubuntu's host inserts each new item to the left of the previous
         // one, so register right-to-left to read cpu, mem, net, disk.
         for item in items.iter().rev() {
@@ -505,8 +672,11 @@ fn main() {
                 source: source_text.to_string(),
                 rate: settings.rate_unit,
                 show_label,
+                widest: std::cell::Cell::new(0),
                 quit: quit.clone(),
                 host_back: host_back.clone(),
+                selection: selection.clone(),
+                reselect: reselect.clone(),
             };
             // Wait for a tray host instead of failing: at login the tray can
             // start before the panel, and GNOME removes the host while the
@@ -539,11 +709,15 @@ fn main() {
     let mut last_attach_try = Instant::now();
     while !quit.load(Ordering::SeqCst) && !handles.iter().any(|h| h.is_closed()) {
         std::thread::sleep(Duration::from_millis(500));
-        if host_back.swap(false, Ordering::SeqCst) {
-            // Items re-registered all at once in arbitrary order; redo it
-            // one by one so the order is stable.
-            std::thread::sleep(Duration::from_secs(1));
-            host_back.store(false, Ordering::SeqCst);
+        let host_returned = host_back.swap(false, Ordering::SeqCst);
+        if host_returned || reselect.swap(false, Ordering::SeqCst) {
+            // After the host returns, items re-registered all at once in
+            // arbitrary order; after a menu change the set differs. Either
+            // way, re-create them one by one so the order is stable.
+            if host_returned {
+                std::thread::sleep(Duration::from_secs(1));
+                host_back.store(false, Ordering::SeqCst);
+            }
             for h in std::mem::take(&mut handles) {
                 h.shutdown().wait();
             }
@@ -618,5 +792,32 @@ fn main() {
     }
     for h in handles {
         h.shutdown().wait();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn w(s: &str) -> usize {
+        s.chars().count()
+    }
+
+    #[test]
+    fn compact_values_have_constant_width() {
+        for v in [
+            0.0, 5.0, 64.0, 999.0, 1000.0, 1536.0, 9.0e4, 1.2e6, 5.0e8, 3.0e9,
+        ] {
+            assert_eq!(w(&short_rate(v, RateUnit::Bytes)), 5, "{v}");
+            assert_eq!(w(&short_rate(v, RateUnit::Bits)), 5, "{v}");
+        }
+        assert_eq!(short_rate(1536.0, RateUnit::Bytes), "\u{2007}1.5K");
+        assert_eq!(
+            short_rate(64.0 * 1024.0, RateUnit::Bytes),
+            "\u{2008}\u{2007}64K"
+        );
+        assert_eq!(short_rate(1000.0 * 1024.0, RateUnit::Bytes), "\u{2007}1.0M");
+        assert_eq!(short_bytes(9.6 * 1024.0 * 1024.0 * 1024.0), "\u{2007}9.6G");
+        assert_eq!(pad("5", 3), "\u{2007}\u{2007}5");
     }
 }

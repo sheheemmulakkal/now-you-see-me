@@ -267,9 +267,10 @@ monochrome.
 
 ### Tray (`nysm-tray`)
 Icons with live values in the top bar: CPU `24%`, memory `6.2G`, network
-`↓1.8 MiB/s ↑240 KiB/s` and disk `R 12 MiB/s W 3 MiB/s` (choose with
-`--items cpu,mem,net,disk`; `--meter` for one compact two-bar icon; `--no-label`
-for icons only). A `⚠` appears while an alert fires. Text in the bar needs
+`↓1.8M ↑240K` and disk activity `12%`. Choose what is shown from its menu
+(*Show in top bar*, including disk read/write); the choice is saved. `--meter`
+gives one compact two-bar icon; `--no-label` icons only. Hovering any item
+shows the full summary. A `⚠` appears while an alert fires. Text in the bar needs
 Ubuntu's AppIndicator host; other desktops show the icons.
 Hover for exact values; open its menu for CPU, memory, network, disk,
 pressure and temperature lines, firing alerts, the data source and "Open

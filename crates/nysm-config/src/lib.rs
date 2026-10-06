@@ -105,7 +105,7 @@ pub enum Theme {
     Dark,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Display {
     pub rate_unit: RateUnitCfg,
@@ -115,6 +115,21 @@ pub struct Display {
     /// Desktop app: resolve container names through the Docker/Podman API
     /// socket (opt-in; that socket grants broad privileges).
     pub container_names: bool,
+    /// Tray items in the top bar, comma separated, in order:
+    /// cpu, mem, net, disk (activity %), diskio (read/write).
+    pub tray_items: String,
+}
+
+impl Default for Display {
+    fn default() -> Self {
+        Display {
+            rate_unit: RateUnitCfg::default(),
+            ascii: false,
+            theme: Theme::default(),
+            container_names: false,
+            tray_items: "cpu,mem,net,disk".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -160,6 +175,7 @@ pub struct Settings {
     pub ascii: bool,
     pub theme: Theme,
     pub container_names: bool,
+    pub tray_items: String,
     pub rules: Vec<Rule>,
     pub incidents: IncidentSettings,
 }
@@ -302,6 +318,7 @@ impl Config {
             ascii: self.display.ascii,
             theme: self.display.theme,
             container_names: self.display.container_names,
+            tray_items: self.display.tray_items.clone(),
             rules,
             incidents: IncidentSettings {
                 enabled: self.incidents.enabled,

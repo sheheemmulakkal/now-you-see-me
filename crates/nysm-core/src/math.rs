@@ -209,6 +209,11 @@ pub fn sum_disk_io<'a>(items: impl IntoIterator<Item = &'a DiskIo>) -> DiskIo {
         t.write_bytes_per_s += d.write_bytes_per_s;
         t.read_ops_per_s += d.read_ops_per_s;
         t.write_ops_per_s += d.write_ops_per_s;
+        // Busy time does not add up across disks: report the busiest one.
+        t.busy_pct = match (t.busy_pct, d.busy_pct) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        };
     }
     t
 }
@@ -535,5 +540,12 @@ mod tests {
         assert_eq!(r.read_latency_ms, Some(0.5));
         assert_eq!(r.write_latency_ms, None);
         assert_eq!(r.busy_pct, Some(25.0));
+        let mut other = r;
+        other.busy_pct = Some(60.0);
+        assert_eq!(
+            sum_disk_io([&r, &other]).busy_pct,
+            Some(60.0),
+            "busiest disk"
+        );
     }
 }

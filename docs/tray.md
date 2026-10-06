@@ -20,16 +20,22 @@ cp packaging/linux/nysm-tray.desktop ~/.config/autostart/
 
 ## What it shows
 - **Top bar (default)**: one item per metric, each a symbolic icon with
-  its value next to it — CPU `24%`, memory `6.2G`, network
-  `↓1.8 MiB/s ↑240 KiB/s`, disk `R 12 MiB/s W 3 MiB/s`. Choose and order them
-  with `--items cpu,mem,net,disk`. A `⚠` appears before the first value while
-  an alert fires. The icons are symbolic, so the panel recolours them to its
-  text colour.
+  its value next to it — CPU `24%`, memory `6.2G`, network `↓1.8M ↑240K`,
+  disk activity `12%` (busiest disk), optionally disk read/write `R1.2M W340K`.
+  Values are compact (bytes per second, binary prefixes; bits with
+  `--rate-unit bits`) and fixed-width, and each item keeps its widest width,
+  so neighbours do not jump. A `⚠` appears before the first value while an
+  alert fires. The icons are symbolic, so the panel recolours them.
+- **Choose what to show**: menu → *Show in top bar* → CPU usage, Memory used,
+  Network download / upload, Disk activity (%), Disk read / write. Applied at
+  once and saved as `display.tray_items` (e.g. `"cpu,mem,net,disk"`);
+  `--items cpu,mem,net,disk,diskio` overrides it for one run.
 - **`--meter`**: a single item instead: a live two-bar icon (CPU blue,
   memory purple; grey when stale, red corner on alerts) followed by
   `24% · 6.2G · ↓1.8 MiB/s ↑240 KiB/s`.
 - **`--no-label`**: icons only (for hosts or users that want no text).
-- **Tooltip**: CPU, memory, network.
+- **Tooltip**: the same full summary on every item (CPU, memory, network,
+  disk, load and pressure, temperatures, firing alerts).
 - **Menu**: CPU (with core count), memory (used/total/available), network
   ↓/↑, disk read/write, load and pressure (cpu/mem/io), firing alerts,
   data source, *Open monitor* (also on left click), *Quit*.

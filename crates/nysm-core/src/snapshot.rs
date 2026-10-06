@@ -266,7 +266,8 @@ pub struct DiskIo {
     pub read_latency_ms: Option<f64>,
     pub write_latency_ms: Option<f64>,
     /// Share of the interval with at least one I/O in flight. Not a
-    /// saturation score for devices that serve requests in parallel.
+    /// saturation score for devices that serve requests in parallel. In the
+    /// disk total this is the busiest disk's value.
     pub busy_pct: Option<f64>,
     pub in_flight: Option<u64>,
 }
