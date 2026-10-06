@@ -57,8 +57,9 @@ capacity is kept separate from per-device activity.
 ## Large text (checked 2026-10-06)
 Rendered with `gtk-xft-dpi` at 1.5× (144 DPI): all text, cards and tables
 scale and nothing overlaps; chart axis labels scale with DPI (10 px at
-96 DPI). Known limitation: fixed column widths make the window's minimum
-width grow to ~1480 px at 1.5× text, wider than small laptop screens.
+96 DPI). Pages scroll horizontally when tables are wider than the window
+(fixed column widths), so the window no longer has to grow beyond the
+screen; verified at 1024 px wide with 1.5× text.
 Screen-reader (Orca) testing has not been done.
 
 ## Measured (reference machine, release, broadway, 30 s, embedded collector)

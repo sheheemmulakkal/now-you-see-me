@@ -158,7 +158,9 @@ fn page(stack: &gtk::Stack, name: &str, title: &str) -> gtk::Box {
     b.append(&label(title, &["page-title"]));
     let scroll = gtk::ScrolledWindow::new();
     scroll.set_child(Some(&b));
-    scroll.set_hscrollbar_policy(gtk::PolicyType::Never);
+    // Horizontal scrolling (when needed) keeps the window usable on small
+    // screens with large text, instead of forcing a wide minimum size.
+    scroll.set_hscrollbar_policy(gtk::PolicyType::Automatic);
     stack.add_named(&scroll, Some(name));
     b
 }
