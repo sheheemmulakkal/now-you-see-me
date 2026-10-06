@@ -516,10 +516,33 @@ pub fn set_many(path: &Path, values: &[(&str, &str)]) -> Result<Settings, Config
     Ok(settings)
 }
 
+/// Remove `NAME.toml.tmp-PID` files left by writers that died mid-save
+/// (the PID is no longer running). Best effort.
+fn remove_stale_temps(path: &Path) {
+    let (Some(dir), Some(stem)) = (path.parent(), path.file_stem()) else {
+        return;
+    };
+    let prefix = format!("{}.toml.tmp-", stem.to_string_lossy());
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(pid) = name.strip_prefix(&prefix).and_then(|p| p.parse::<u32>().ok()) else {
+            continue;
+        };
+        let alive = cfg!(unix) && Path::new(&format!("/proc/{pid}")).exists();
+        if !alive && pid != std::process::id() {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
+    remove_stale_temps(path);
     let tmp = path.with_extension(format!("toml.tmp-{}", std::process::id()));
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create_new(true);
@@ -590,6 +613,20 @@ mod tests {
         std::fs::write(&path, "version = 1\n[sampling]\nbogus = 1\n").unwrap();
         assert!(set_many(&path, &[("display.theme", "light")]).is_err());
         assert!(std::fs::read_to_string(&path).unwrap().contains("bogus"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn stale_temp_files_are_removed() {
+        let dir = std::env::temp_dir().join(format!("nysm-cfg-tmp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        // PID 4194304 is above the default Linux pid_max, so never alive.
+        let stale = dir.join("config.toml.tmp-4194304");
+        std::fs::write(&stale, "x").unwrap();
+        set_many(&path, &[("display.theme", "dark")]).unwrap();
+        assert!(!stale.exists());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

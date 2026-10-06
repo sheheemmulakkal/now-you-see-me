@@ -185,7 +185,7 @@ impl WatchTile {
         ));
         let last = p.points.back();
         let status = match (p.exited, last) {
-            (true, _) => "exited — history kept until you stop watching".to_string(),
+            (true, _) => "exited — history shown for 15 minutes, then removed".to_string(),
             (false, Some(pt)) => format!(
                 "CPU {} · memory {}",
                 pt.cpu_pct.map_or("—".into(), |c| format!("{c:.1}%")),

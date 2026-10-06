@@ -170,6 +170,9 @@ pub fn max_history_samples() -> usize {
     MAX_HISTORY_BYTES / std::mem::size_of::<HistoryPoint>()
 }
 
+/// How long an exited pinned process stays listed (15 min).
+pub const EXITED_PIN_KEEP_MS: i64 = 15 * 60 * 1000;
+
 /// One sample of a pinned process.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ProcessPoint {
@@ -184,8 +187,12 @@ pub struct ProcessPoint {
 pub struct PinnedProcess {
     pub id: crate::raw::ProcessId,
     pub name: String,
-    /// The process is gone; history is kept until unpinned.
+    /// The process is gone; its history is kept for a while (see
+    /// [`EXITED_PIN_KEEP_MS`]) so it can still be read, then dropped.
     pub exited: bool,
+    /// When the process was first seen gone (Unix ms).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exited_ms: Option<i64>,
     pub points: VecDeque<ProcessPoint>,
 }
 
@@ -220,6 +227,7 @@ impl ProcessHistory {
             id,
             name,
             exited: false,
+            exited_ms: None,
             points: VecDeque::new(),
         });
         Ok(())
@@ -254,9 +262,17 @@ impl ProcessHistory {
                         write_bytes_per_s: io.map(|d| d.write_bytes_per_s as f32),
                     });
                 }
-                None => pin.exited = true,
+                None => {
+                    pin.exited = true;
+                    pin.exited_ms.get_or_insert(table.timestamp_ms);
+                }
             }
         }
+        // Forget exited processes after a while, so pins never pile up.
+        self.pinned.retain(|p| {
+            p.exited_ms
+                .is_none_or(|t| table.timestamp_ms - t < EXITED_PIN_KEEP_MS)
+        });
     }
 }
 
@@ -294,6 +310,23 @@ mod pin_tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn exited_pins_are_forgotten_after_a_while() {
+        let mut h = ProcessHistory::new(4, 10);
+        let a = ProcessId {
+            pid: 10,
+            start_ticks: 1,
+        };
+        h.pin(a.clone(), "a".into()).unwrap();
+        h.observe(&table(0, &[(10, 1)]));
+        h.observe(&table(1_000, &[])); // exited
+        assert!(h.pinned()[0].exited);
+        h.observe(&table(1_000 + EXITED_PIN_KEEP_MS - 1, &[]));
+        assert_eq!(h.pinned().len(), 1, "kept for a while");
+        h.observe(&table(1_000 + EXITED_PIN_KEEP_MS, &[]));
+        assert!(h.pinned().is_empty(), "then dropped");
     }
 
     #[test]

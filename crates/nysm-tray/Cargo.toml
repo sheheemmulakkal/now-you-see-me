@@ -12,6 +12,7 @@ name = "nysm-tray"
 path = "src/main.rs"
 
 [dependencies]
+libc.workspace = true
 nysm-core.workspace = true
 nysm-engine.workspace = true
 nysm-ipc.workspace = true

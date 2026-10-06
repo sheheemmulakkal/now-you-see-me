@@ -741,6 +741,7 @@ impl Pages {
                 let snap = st.borrow().last.clone();
                 if let Some(s) = snap {
                     let prev = std::mem::take(&mut st.borrow_mut().rows);
+                    let shown = st.borrow().details_for;
                     let rows = render_processes(
                         &s,
                         &list,
@@ -748,6 +749,7 @@ impl Pages {
                         &search.text(),
                         sort_key(sort.selected()),
                         &prev,
+                        shown,
                     );
                     st.borrow_mut().rows = rows;
                 }
@@ -1350,6 +1352,7 @@ impl Pages {
             self.proc_state.borrow_mut().last = Some(s.clone());
             if changed {
                 let prev = std::mem::take(&mut self.proc_state.borrow_mut().rows);
+                let shown = self.proc_state.borrow().details_for;
                 let rows = render_processes(
                     s,
                     &self.proc_table,
@@ -1357,6 +1360,7 @@ impl Pages {
                     &self.proc_search.text(),
                     sort_key(self.proc_sort.selected()),
                     &prev,
+                    shown,
                 );
                 let mut st = self.proc_state.borrow_mut();
                 st.rows = rows;
@@ -1799,6 +1803,7 @@ fn render_processes(
     filter: &str,
     key: ProcessSort,
     prev: &[(u32, u64, String)],
+    shown: Option<(u32, u64)>,
 ) -> RowIds {
     let Some(t) = &s.processes else {
         count.set_text("process list not available");
@@ -1838,11 +1843,18 @@ fn render_processes(
     }
     // Rows are re-sorted on every refresh; keep the selection on the same
     // processes rather than the same positions.
-    let selected: Vec<(u32, u64)> = table
+    let mut selected: Vec<(u32, u64)> = table
         .selected_rows()
         .into_iter()
         .filter_map(|i| prev.get(i).map(|r| (r.0, r.1)))
         .collect();
+    // With no other selection, highlight the process shown in the details
+    // panel whenever it is in the list (e.g. after a filter is cleared).
+    if selected.is_empty()
+        && let Some(id) = shown
+    {
+        selected.push(id);
+    }
     table.set_rows(rows);
     if !selected.is_empty() {
         let keep: Vec<usize> = ids

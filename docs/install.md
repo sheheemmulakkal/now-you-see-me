@@ -60,3 +60,21 @@ stops a running collector only if that process runs this installation's
 Verified: install with `--autostart-tray --service-unit` placed 11 files;
 uninstall removed all of them (0 left); a collector started from another
 binary kept running.
+
+### What uninstall removes
+`~/.local/share/nysm/uninstall.sh` removes the installed files, stops this
+installation's tray and collector, removes the tray's login entry if it starts
+this installation, and clears the tray images in the runtime directory. Open
+desktop windows are reported, not closed. `--purge-config` also deletes
+`~/.config/nysm`; `--purge` also deletes saved data in `~/.local/state/nysm`
+(incident captures). Files you recorded with `nysm record -o FILE` are never
+touched. Verified in a throwaway HOME: nothing left after `--purge`.
+
+### Cleanup while running
+- The collector removes its socket on exit and replaces a stale one on start.
+- The tray removes its images when it quits or is stopped (logout, `kill`, the
+  desktop app's switch) and when switching away from the strip.
+- History, process pins and incident captures are bounded; watched processes
+  that exited are dropped 15 minutes after exit.
+- Interrupted config saves leave no temp files behind: stale
+  `config.toml.tmp-PID` files are removed on the next save.

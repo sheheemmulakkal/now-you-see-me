@@ -938,6 +938,23 @@ fn gnome_text_scale() -> f64 {
         .unwrap_or(1.0)
 }
 
+/// Set by SIGTERM/SIGINT/SIGHUP (logout, `kill`, the desktop app's switch)
+/// so the main loop exits normally and cleans up.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn on_stop_signal(_: libc::c_int) {
+    STOP.store(true, Ordering::SeqCst);
+}
+
+fn install_stop_signals() {
+    // SAFETY: the handler only stores to an atomic.
+    unsafe {
+        for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+            libc::signal(sig, on_stop_signal as *const () as libc::sighandler_t);
+        }
+    }
+}
+
 fn update_all(handles: &[ksni::blocking::Handle<NysmTray>], f: &dyn Fn(&mut NysmTray)) {
     for h in handles {
         h.update(|t| {
@@ -1105,7 +1122,11 @@ fn main() {
     };
     let mut config_mtime = mtime(&path);
     let mut last_config_check = Instant::now();
-    while !quit.load(Ordering::SeqCst) && !handles.iter().any(|h| h.is_closed()) {
+    install_stop_signals();
+    while !quit.load(Ordering::SeqCst)
+        && !STOP.load(Ordering::SeqCst)
+        && !handles.iter().any(|h| h.is_closed())
+    {
         std::thread::sleep(Duration::from_millis(500));
         if last_config_check.elapsed() >= Duration::from_secs(2) {
             last_config_check = Instant::now();
@@ -1216,6 +1237,9 @@ fn main() {
     }
     for h in handles {
         h.shutdown().wait();
+    }
+    if !icon_dir.is_empty() {
+        strip::remove_files(Path::new(&icon_dir));
     }
 }
 

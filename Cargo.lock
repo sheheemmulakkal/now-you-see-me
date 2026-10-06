@@ -1237,6 +1237,7 @@ name = "nysm-tray"
 version = "0.1.0"
 dependencies = [
  "ksni",
+ "libc",
  "nysm-config",
  "nysm-core",
  "nysm-engine",

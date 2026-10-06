@@ -160,6 +160,22 @@ impl Writer {
     }
 }
 
+/// Remove the strip images in `dir`.
+pub fn remove_files(dir: &Path) {
+    for i in 0..2 {
+        let _ = std::fs::remove_file(dir.join(format!("nysm-strip-{i}.svg")));
+    }
+}
+
+impl Drop for Writer {
+    /// The images belong to this tray item: remove them when it goes away
+    /// (switching to separate items). On exit `main` removes them too, as
+    /// the item may still be owned by the tray thread then.
+    fn drop(&mut self) {
+        remove_files(&self.dir);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
