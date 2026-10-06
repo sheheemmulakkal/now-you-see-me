@@ -32,7 +32,7 @@ Legend: ✅ done and verified · 🟡 partial · ⬜ not started
 
 ## Milestone 3: Ubuntu desktop and panel
 - ✅ Per-user collector service + Unix socket protocol (ADR 0005); TUI attaches with fallback
-- 🟡 GTK4 desktop (`nysm-desktop`): all pages, attach/fallback, dark mode, hidden-window idle (experimental; libadwaita and ColumnView process list pending; see docs/desktop.md)
+- 🟡 GTK4 desktop (`nysm-desktop`): all pages, attach/fallback, dark mode, hidden-window idle (experimental; virtualized process table; libadwaita pending; see docs/desktop.md)
 - ✅ Tray indicator `nysm-tray` (StatusNotifierItem): default top-bar component, confirmed on Ubuntu GNOME 46 (docs/tray.md)
 - 🟡 Optional GNOME Shell 46 extension: built, client/reconnect tested with gjs; not loaded in a live shell (blocked by the user's global extension setting)
 - ✅ Desktop redesign to the reference collage: cards, area charts with time axis, icon sidebar, range selector, warm light + dark themes (B, D). C (engineer workspace) is covered by the TUI and Processes page; a combined dense view is not built.

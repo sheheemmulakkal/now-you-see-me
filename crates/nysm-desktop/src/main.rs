@@ -4,6 +4,7 @@
 
 mod chart;
 mod pages;
+mod proctable;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -31,6 +32,7 @@ const CSS: &str = "
 .alert-banner { background: #c01c28; color: white; padding: 8px 12px; border-radius: 8px; font-weight: bold; }
 .status-live { color: #2ec4b5; } .status-stale { color: #e5a50a; }
 .flat-list, .flat-list row { background: transparent; }
+.proc-table > listview > row > cell { padding: 3px 6px; }
 .flat-list row { border-bottom: 1px solid alpha(currentColor, 0.06); }
 .nav { background: transparent; padding: 8px; }
 .nav row { border-radius: 8px; padding: 8px 10px; margin: 1px 0; }

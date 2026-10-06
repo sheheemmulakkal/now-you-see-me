@@ -29,7 +29,7 @@ capacity is kept separate from per-device activity.
   lines (pressure, load), plus top processes by CPU. Alert banner when a
   rule is firing.
 - **Processes**: filter (name/PID/user), sort (CPU, memory, disk I/O, name,
-  PID), top 200 rows; activate a row for executable, working directory,
+  PID), every process in a virtualized table; activate a row for executable, working directory,
   cgroup and open file descriptors (command line never shown here).
 - **Containers & services**: cgroup v2 groups (containers, services,
   apps) with kind filter and sort; collected only while the page is open.
@@ -66,12 +66,14 @@ Screen-reader (Orca) testing has not been done.
 | visible page | CPU % of one core | RSS |
 | --- | --- | --- |
 | Overview | 2.8 | 47 MiB |
-| Processes | 2.4 | 53 MiB |
+| Processes (all ~490 processes listed) | 2.0 | 62 MiB |
 
 Broadway (headless) rendering differs from X11/Wayland GL, so treat these
 as indicative. The Processes page first cost 6.4 % because it rebuilt
-~200 row widgets on every refresh; rows are now created once and only
-their label texts are updated.
+~200 row widgets on every refresh; reusing rows brought it to 2.4 %. It is
+now a virtualized GtkColumnView: every process is listed (no 200-row cap),
+only the visible rows have widgets, and a refresh updates their text in
+place, so scroll position and selection are kept.
 
 ## Not yet done
 - libadwaita (`libadwaita-1-dev` is not installed on the dev machine;

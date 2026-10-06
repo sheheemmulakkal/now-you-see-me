@@ -19,8 +19,10 @@ use nysm_core::units::{self, RateUnit};
 use nysm_core::{Reading, Status};
 
 use crate::chart::{self, Chart, Series};
+use crate::proctable::{self, ProcTable};
 
-const MAX_PROCESS_ROWS: usize = 200;
+/// Cap for the (non-virtualized) group list.
+const MAX_LIST_ROWS: usize = 200;
 const TOP_ROWS: usize = 6;
 
 /// Called with (pid, start_ticks) when the user activates a process row.
@@ -230,7 +232,7 @@ pub struct Pages {
     proc_search: gtk::SearchEntry,
     proc_sort: gtk::DropDown,
     proc_count: gtk::Label,
-    proc_list: gtk::ListBox,
+    proc_table: ProcTable,
     proc_details: gtk::Label,
     proc_state: Rc<RefCell<ProcState>>,
     details_cb: DetailsCallback,
@@ -360,20 +362,17 @@ impl Pages {
         bar.append(&proc_count);
         pp.append(&bar);
         let (list_card, _) = card("");
-        list_card.append(&row(&[
-            ("PID".into(), 8, 1.0),
-            ("USER".into(), 10, 0.0),
-            ("CPU %".into(), 6, 1.0),
-            ("RSS".into(), 9, 1.0),
-            ("READ/s".into(), 10, 1.0),
-            ("WRITE/s".into(), 10, 1.0),
-            ("NAME".into(), 0, 0.0),
-        ]));
         let split = gtk::Box::new(gtk::Orientation::Horizontal, 14);
-        let proc_list = gtk::ListBox::new();
-        proc_list.set_hexpand(true);
-        proc_list.add_css_class("flat-list");
-        list_card.append(&proc_list);
+        split.set_vexpand(true);
+        let proc_table = ProcTable::new();
+        // Its own scroller keeps the view virtualized (only visible rows
+        // get widgets) and fills the page height.
+        let proc_scroll = gtk::ScrolledWindow::new();
+        proc_scroll.set_child(Some(&proc_table.view));
+        proc_scroll.set_hexpand(true);
+        proc_scroll.set_vexpand(true);
+        proc_scroll.set_min_content_height(360);
+        list_card.append(&proc_scroll);
         split.append(&list_card);
         let (details_card, _) = card("Details");
         details_card.set_hexpand(false);
@@ -514,7 +513,7 @@ impl Pages {
             proc_search,
             proc_sort,
             proc_count,
-            proc_list,
+            proc_table,
             proc_details,
             proc_state: Rc::new(RefCell::new(ProcState {
                 last: None,
@@ -547,7 +546,7 @@ impl Pages {
         let rerender = {
             let (st, list, count, search, sort) = (
                 self.proc_state.clone(),
-                self.proc_list.clone(),
+                self.proc_table.clone(),
                 self.proc_count.clone(),
                 self.proc_search.clone(),
                 self.proc_sort.clone(),
@@ -575,12 +574,8 @@ impl Pages {
             self.details_cb.clone(),
             self.proc_details.clone(),
         );
-        self.proc_list.connect_row_activated(move |_, row| {
-            let idx = row.index();
-            let Some((pid, start)) = (idx >= 0)
-                .then(|| st.borrow().rows.get(idx as usize).copied())
-                .flatten()
-            else {
+        self.proc_table.connect_activate(move |idx| {
+            let Some((pid, start)) = st.borrow().rows.get(idx).copied() else {
                 return;
             };
             details.set_text(&format!("Loading details for PID {pid}…"));
@@ -914,7 +909,7 @@ impl Pages {
             if changed {
                 let rows = render_processes(
                     s,
-                    &self.proc_list,
+                    &self.proc_table,
                     &self.proc_count,
                     &self.proc_search.text(),
                     sort_key(self.proc_sort.selected()),
@@ -1114,7 +1109,7 @@ impl Pages {
                 ("MAIN".into(), 12, 0.0),
             ],
         );
-        let n = rows.len().min(MAX_PROCESS_ROWS);
+        let n = rows.len().min(MAX_LIST_ROWS);
         for (k, g) in rows.iter().take(n).enumerate() {
             let mem = match (g.memory_bytes, g.memory_max_bytes) {
                 (Some(v), Some(m)) => {
@@ -1338,29 +1333,21 @@ fn sort_key(i: u32) -> ProcessSort {
 
 fn render_processes(
     s: &Snapshot,
-    list: &gtk::ListBox,
+    table: &ProcTable,
     count: &gtk::Label,
     filter: &str,
     key: ProcessSort,
 ) -> Vec<(u32, u64)> {
     let Some(t) = &s.processes else {
         count.set_text("process list not available");
-        hide_rows_from(list, 0);
+        table.set_rows(Vec::new());
         return Vec::new();
     };
     let order = query::view(&t.entries, key, filter);
-    count.set_text(&format!(
-        "{} of {} shown{}",
-        order.len().min(MAX_PROCESS_ROWS),
-        t.entries.len(),
-        if order.len() > MAX_PROCESS_ROWS {
-            " · filter for more"
-        } else {
-            ""
-        }
-    ));
-    let mut ids = Vec::new();
-    for (k, i) in order.into_iter().take(MAX_PROCESS_ROWS).enumerate() {
+    count.set_text(&format!("{} of {} shown", order.len(), t.entries.len()));
+    let mut ids = Vec::with_capacity(order.len());
+    let mut rows: Vec<proctable::Cells> = Vec::with_capacity(order.len());
+    for i in order {
         let p = &t.entries[i];
         let (r, w) = match p.disk_io.live() {
             Some(d) => (
@@ -1372,33 +1359,21 @@ fn render_processes(
             }
             None => ("—".into(), "—".into()),
         };
-        set_row(
-            list,
-            k,
-            &[
-                (p.id.pid.to_string(), 8, 1.0),
-                (
-                    safe(
-                        &p.user
-                            .clone()
-                            .unwrap_or_else(|| p.uid.map_or("?".into(), |u| u.to_string())),
-                    ),
-                    10,
-                    0.0,
-                ),
-                (
-                    p.cpu_pct.live().map_or("—".into(), |c| format!("{c:.1}")),
-                    6,
-                    1.0,
-                ),
-                (units::bytes(p.rss_bytes as f64), 9, 1.0),
-                (r, 10, 1.0),
-                (w, 10, 1.0),
-                (safe(&p.name), 0, 0.0),
-            ],
-        );
+        rows.push([
+            safe(&p.name),
+            p.id.pid.to_string(),
+            safe(
+                &p.user
+                    .clone()
+                    .unwrap_or_else(|| p.uid.map_or("?".into(), |u| u.to_string())),
+            ),
+            p.cpu_pct.live().map_or("—".into(), |c| format!("{c:.1}")),
+            units::bytes(p.rss_bytes as f64),
+            r,
+            w,
+        ]);
         ids.push((p.id.pid, p.id.start_ticks));
     }
-    hide_rows_from(list, ids.len());
+    table.set_rows(rows);
     ids
 }

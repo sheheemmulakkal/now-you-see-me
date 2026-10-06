@@ -11,6 +11,8 @@ Read this first when resuming. Newest entry on top.
   read as ~3.4 GiB/h even though another process freed 2 GB mid-run, which
   had pushed a least-squares fit to −73 GB/h. That is why the estimator is
   robust.
+- Desktop process list is a virtualized GtkColumnView listing every
+  process (was capped at 200); 2.0 % CPU on the Processes page.
 - SSH remote testing on real hardware paused (no second machine).
 
 ## 2026-10-06 — paused by the user (resume here)
