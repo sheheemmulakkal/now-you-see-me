@@ -59,7 +59,8 @@ COPY
 mkpkg nysm "Resource monitor for engineers (CLI, TUI, collector)
  Precise, lightweight system monitor: CPU, memory, pressure, network,
  storage, processes, containers and services. No GUI dependencies." "" \
-  "$stage/bin/nysm:usr/bin/nysm" "README.md:usr/share/doc/nysm/README.md"
+  "$stage/bin/nysm:usr/bin/nysm" "README.md:usr/share/doc/nysm/README.md" \
+  "packaging/icons/dev.nysm.NowYouSeeMe.svg:usr/share/icons/hicolor/scalable/apps/dev.nysm.NowYouSeeMe.svg"
 
 mkpkg nysm-tray "Tray indicator for Now You See Me
  Live CPU/memory meter for StatusNotifier/AppIndicator trays. Autostart is

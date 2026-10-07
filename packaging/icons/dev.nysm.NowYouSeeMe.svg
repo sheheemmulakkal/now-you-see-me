@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none">
+  <title>Now You See Me</title>
+  <desc>A rounded open dial with a needle pointing northeast.</desc>
+  <defs>
+    <!-- Brand gradient: teal #2EC4B5 (CPU) to purple #A66BFF (memory). -->
+    <linearGradient id="nysm" x1="20" y1="236" x2="236" y2="20" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2EC4B5"/>
+      <stop offset="1" stop-color="#A66BFF"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#nysm)">
+    <path d="M50.865 219.925 A120 120 0 1 1 205.135 219.925 A18 18 0 0 1 181.994 192.347 A84 84 0 1 0 74.006 192.347 A18 18 0 0 1 50.865 219.925Z"/>
+    <path d="M116.333 116.333 L170.637 73.09 C179.05 66.39 187.61 74.95 180.91 83.363 L137.667 137.667 A15.086 15.086 0 0 1 116.333 116.333Z"/>
+  </g>
+</svg>

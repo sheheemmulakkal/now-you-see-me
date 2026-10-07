@@ -19,7 +19,8 @@ for a in "$@"; do
   esac
 done
 manifest="$prefix/share/nysm/installed-files"
-mkdir -p "$prefix/bin" "$prefix/share/applications" "$prefix/share/nysm" "$prefix/share/doc/nysm"
+mkdir -p "$prefix/bin" "$prefix/share/applications" "$prefix/share/nysm" "$prefix/share/doc/nysm" \
+  "$prefix/share/icons/hicolor/scalable/apps"
 : > "$manifest.tmp"
 put() { # src dest mode
   install -m "$3" "$1" "$2"
@@ -32,6 +33,8 @@ if [ -f "$here/bin/nysm-desktop" ]; then
   put "$here/share/applications/dev.nysm.NowYouSeeMe.desktop" "$prefix/share/applications/dev.nysm.NowYouSeeMe.desktop" 0644
 fi
 put "$here/share/applications/nysm-tray.desktop" "$prefix/share/applications/nysm-tray.desktop" 0644
+put "$here/share/icons/hicolor/scalable/apps/dev.nysm.NowYouSeeMe.svg" \
+  "$prefix/share/icons/hicolor/scalable/apps/dev.nysm.NowYouSeeMe.svg" 0644
 for d in README.md LICENSE-MIT LICENSE-APACHE THIRD-PARTY-LICENSES.txt; do
   put "$here/$d" "$prefix/share/doc/nysm/$d" 0644
 done

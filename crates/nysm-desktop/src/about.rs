@@ -79,7 +79,15 @@ pub fn build(page: &gtk::Box, history: Duration, interval: Duration) -> About {
     // Header: icon, name, version, licence, one-line summary.
     let hero = gtk::Box::new(gtk::Orientation::Horizontal, 18);
     hero.add_css_class("card");
-    let icon = gtk::Image::from_icon_name("utilities-system-monitor");
+    // The app's own icon when installed, else a generic one.
+    let has_own = gtk::gdk::Display::default()
+        .map(|d| gtk::IconTheme::for_display(&d).has_icon(nysm_core::brand::APP_ID))
+        .unwrap_or(false);
+    let icon = gtk::Image::from_icon_name(if has_own {
+        nysm_core::brand::APP_ID
+    } else {
+        "utilities-system-monitor"
+    });
     icon.set_pixel_size(64);
     icon.set_valign(gtk::Align::Center);
     hero.append(&icon);

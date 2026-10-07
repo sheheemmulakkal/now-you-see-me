@@ -1,3 +1,5 @@
+<p align="center"><img src="packaging/icons/dev.nysm.NowYouSeeMe.svg" width="120" alt="Now You See Me logo"></p>
+
 # Now You See Me (`nysm`)
 
 A lightweight, precise resource monitor for engineers. It answers four

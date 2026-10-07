@@ -403,6 +403,7 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
         .title(nysm_core::brand::PRODUCT_NAME)
         .default_width(1180)
         .default_height(820)
+        .icon_name(nysm_core::brand::APP_ID)
         .build();
     let theme = args.theme.unwrap_or(settings.theme);
     apply_theme(&window, theme);
