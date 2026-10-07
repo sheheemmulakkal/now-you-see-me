@@ -155,7 +155,23 @@ def logo(size):
 def tui_image(view):
     pal = {"Reset": FG, "Cyan": (86, 214, 201), "Green": (122, 217, 122), "Yellow": (245, 196, 81),
            "Magenta": (199, 146, 234), "DarkGray": (110, 117, 135), "Red": (240, 113, 120),
-           "Blue": (120, 160, 255), "White": (255, 255, 255), "Gray": (170, 175, 190)}
+           "Blue": (120, 160, 255), "White": (255, 255, 255), "Gray": (170, 175, 190),
+           "LightRed": (255, 128, 128), "Black": (16, 19, 32)}
+
+    def xterm(n):
+        if n >= 232:
+            v = 8 + (n - 232) * 10
+            return (v, v, v)
+        if n >= 16:
+            n -= 16
+            lv = [0, 95, 135, 175, 215, 255]
+            return (lv[n // 36], lv[n // 6 % 6], lv[n % 6])
+        return FG
+
+    def color(name, default=None):
+        if name.startswith("Indexed("):
+            return xterm(int(name[8:-1]))
+        return pal.get(name, default)
     bgc = (16, 19, 32)
     host = os.uname().nodename
     for l in open(os.path.join(CAP, "tui.jsonl")):
@@ -169,22 +185,33 @@ def tui_image(view):
                 for k, ch in enumerate("workstation".ljust(len(host))):
                     row[i + k][0] = ch
         fr, fb = font(20, "Regular", True), font(20, "Bold", True)
+        # Box corners, arrows and dots Ubuntu Sans Mono lacks.
+        fallback = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 19)
         cw, ch = fr.getbbox("M")[2], 27
         img = Image.new("RGBA", (d["w"] * cw + 40, d["h"] * ch + 30), bgc + (255,))
         dr = ImageDraw.Draw(img)
         for y, row in enumerate(d["cells"]):
             for x, (sym, fg, bg, bold, dim, rev) in enumerate(row):
-                fgc = pal.get(fg, FG)
-                bgcol = pal.get(bg) if bg != "Reset" else None
+                fgc = color(fg, FG)
+                bgcol = color(bg) if bg != "Reset" else None
                 if rev:
                     fgc, bgcol = (bgcol or bgc), fgc
                 px, py = 20 + x * cw, 15 + y * ch
                 if bgcol:
                     dr.rectangle([px, py, px + cw, py + ch], fill=bgcol)
-                if sym.strip():
-                    if dim:
-                        fgc = tuple(int(c * 0.6) for c in fgc)
-                    dr.text((px, py + 2), sym, font=fb if bold else fr, fill=fgc)
+                if dim:
+                    fgc = tuple(int(c * 0.6) for c in fgc)
+                if "\u2800" <= sym <= "\u28ff":  # braille: draw the dots
+                    bits = ord(sym) - 0x2800
+                    for bit, (bx, by) in enumerate([(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2), (0, 3), (1, 3)]):
+                        if bits >> bit & 1:
+                            cx, cy = px + (bx + 0.5) * cw / 2, py + (by + 0.5) * ch / 4
+                            dr.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=fgc)
+                elif sym.strip():
+                    ff = fb if bold else fr
+                    if sym in "╭╮╰╯↓↑←→●⚠▓░" or ff.getmask(sym).size == (0, 0):
+                        ff = fallback
+                    dr.text((px, py + 2), sym, font=ff, fill=fgc)
         return img
     raise SystemExit(f"no TUI view {view}")
 

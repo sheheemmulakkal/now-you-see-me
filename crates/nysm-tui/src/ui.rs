@@ -11,9 +11,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, Borders, Cell, Clear, Paragraph, Row, Sparkline, SparklineBar, Table, Tabs, Wrap,
-};
+use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Tabs, Wrap};
 
 use crate::app::{App, Tab};
 
@@ -42,11 +40,34 @@ impl Theme {
     fn disk(&self) -> Style {
         self.fg(Color::Yellow)
     }
+    fn up(&self) -> Style {
+        self.fg(Color::Blue)
+    }
+    fn write(&self) -> Style {
+        self.fg(Color::LightRed)
+    }
+    /// Secondary text: mid grey, readable on dark and light terminals
+    /// (DarkGray nearly vanishes on many dark themes).
     fn dim(&self) -> Style {
         if self.color {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(Color::Indexed(245))
         } else {
             Style::default().add_modifier(Modifier::DIM)
+        }
+    }
+    fn border(&self) -> Style {
+        if self.color {
+            Style::default().fg(Color::Indexed(240))
+        } else {
+            Style::default().add_modifier(Modifier::DIM)
+        }
+    }
+    /// Heat colour for a 0-100 share: plain, then yellow, then red.
+    fn heat(&self, pct: f64) -> Style {
+        match pct {
+            p if p >= 50.0 => self.fg(Color::LightRed).add_modifier(Modifier::BOLD),
+            p if p >= 15.0 => self.fg(Color::Yellow),
+            _ => Style::default(),
         }
     }
     fn bold(&self) -> Style {
@@ -73,27 +94,24 @@ impl Theme {
         }
     }
     fn selected(&self) -> Style {
-        Style::default().add_modifier(Modifier::REVERSED)
-    }
-    fn bars(&self) -> symbols::bar::Set<'static> {
-        if self.ascii {
-            symbols::bar::Set {
-                full: "#",
-                seven_eighths: "#",
-                three_quarters: "=",
-                five_eighths: "=",
-                half: "-",
-                three_eighths: "-",
-                one_quarter: "_",
-                one_eighth: "_",
-                empty: " ",
-            }
+        if self.color {
+            Style::default()
+                .bg(Color::Indexed(24))
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
         } else {
-            symbols::bar::NINE_LEVELS
+            Style::default().add_modifier(Modifier::REVERSED)
         }
     }
-    fn absent(&self) -> &'static str {
-        if self.ascii { ":" } else { "·" }
+    fn tab_selected(&self) -> Style {
+        if self.color {
+            Style::default()
+                .bg(Color::Cyan)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+        }
     }
     fn borders(&self) -> symbols::border::Set<'static> {
         if self.ascii {
@@ -108,14 +126,14 @@ impl Theme {
                 horizontal_bottom: "-",
             }
         } else {
-            symbols::border::PLAIN
+            symbols::border::ROUNDED
         }
     }
     fn block<'a>(&self, title: &'a str) -> Block<'a> {
         Block::default()
             .borders(Borders::ALL)
             .border_set(self.borders())
-            .border_style(self.dim())
+            .border_style(self.border())
             .title(Span::styled(title, self.bold()))
     }
 }
@@ -228,8 +246,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     f.render_widget(
         Tabs::new(titles)
             .select(idx)
-            .highlight_style(t.selected().add_modifier(Modifier::BOLD))
-            .divider(if t.ascii { "|" } else { "│" }),
+            .style(t.dim())
+            .highlight_style(t.tab_selected())
+            .divider(Span::styled(if t.ascii { "|" } else { "│" }, t.border())),
         tabs,
     );
     match app.tab {
@@ -250,7 +269,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 fn draw_header(f: &mut Frame, area: Rect, app: &App, s: &Snapshot, t: &Theme) {
     let host = safe(s.host.hostname.as_deref().unwrap_or("?"));
     let mut left = vec![
-        Span::styled(nysm_core::brand::COMMAND_NAME, t.bold()),
+        Span::styled(
+            nysm_core::brand::COMMAND_NAME,
+            t.cpu().add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" "),
         Span::raw(host),
     ];
@@ -391,50 +413,234 @@ fn draw_help(f: &mut Frame, area: Rect, t: &Theme) {
     );
 }
 
-/// Build sparkline bars for the most recent `width` points. Missing values
-/// and gaps render as absent bars, never as zero.
+/// Recent samples of one metric, newest last. `None` = no data (warm-up,
+/// gap or unsupported), drawn blank so it never looks like zero.
+struct Series {
+    vals: Vec<Option<f64>>,
+    max: f64,
+    /// Index in `vals` of the timeline cursor.
+    cursor: Option<usize>,
+}
+
+/// The most recent `n` samples; a gap (suspend, stall) adds one blank.
 fn series(
     h: &[HistoryPoint],
-    width: usize,
+    n: usize,
     cursor: Option<usize>,
     get: impl Fn(&HistoryPoint) -> Option<f32>,
-    scale: f64,
-) -> (Vec<SparklineBar>, u64) {
-    let mut bars: Vec<SparklineBar> = Vec::with_capacity(width + 4);
-    let n = h.len();
-    let start = n.saturating_sub(width);
-    let mut max = 1u64;
+) -> Series {
+    let len = h.len();
+    let start = len.saturating_sub(n);
+    let mut vals = Vec::with_capacity(n + 4);
+    let (mut max, mut cur) = (0.0f64, None);
     for (i, p) in h[start..].iter().enumerate() {
         if p.gap_before && i > 0 {
-            bars.push(SparklineBar::from(None::<u64>));
+            vals.push(None);
         }
         let v = get(p)
             .filter(|v| v.is_finite())
-            .map(|v| (v as f64 * scale).max(0.0) as u64);
+            .map(|v| (v as f64).max(0.0));
         if let Some(v) = v {
             max = max.max(v);
         }
-        let mut bar = SparklineBar::from(v);
-        if cursor.is_some_and(|c| start + i + 1 + c == n) {
-            bar = bar.style(Some(Style::default().add_modifier(Modifier::REVERSED)));
+        if cursor.is_some_and(|c| start + i + 1 + c == len) {
+            cur = Some(vals.len());
         }
-        bars.push(bar);
+        vals.push(v);
     }
-    let len = bars.len();
-    if len > width {
-        bars.drain(..len - width);
+    if vals.len() > n {
+        let d = vals.len() - n;
+        vals.drain(..d);
+        cur = cur.and_then(|c| c.checked_sub(d));
     }
-    (bars, max)
+    Series {
+        vals,
+        max,
+        cursor: cur,
+    }
 }
 
-fn spark<'a>(t: &Theme, bars: Vec<SparklineBar>, max: u64, style: Style) -> Sparkline<'a> {
-    Sparkline::default()
-        .data(bars)
-        .max(max)
-        .bar_set(t.bars())
-        .style(style)
-        .absent_value_symbol(t.absent())
-        .absent_value_style(t.dim())
+#[derive(Clone, Copy, PartialEq)]
+enum Fill {
+    /// Filled from the bottom.
+    Area,
+    /// Filled from the top (the lower half of a mirrored chart).
+    Down,
+    /// Only the value, joined to its neighbour: for levels such as memory
+    /// that would otherwise fill the box.
+    Line,
+}
+
+/// Samples per cell: braille packs two columns of four dots.
+fn per_cell(t: &Theme) -> usize {
+    if t.ascii { 1 } else { 2 }
+}
+
+/// Draw `s` scaled to `scale` into `area`, newest sample at the right.
+fn chart(f: &mut Frame, area: Rect, t: &Theme, s: &Series, scale: f64, fill: Fill, style: Style) {
+    let (w, rows) = (area.width as usize, area.height as usize);
+    if w == 0 || rows == 0 {
+        return;
+    }
+    let per = per_cell(t);
+    let pad = (w * per).saturating_sub(s.vals.len());
+    let at = |k: usize| {
+        k.checked_sub(pad)
+            .and_then(|i| s.vals.get(i).copied().flatten())
+    };
+    let dots = rows * if t.ascii { 1 } else { 4 };
+    // Present samples get at least one dot, so zero is a baseline and a
+    // missing sample (blank) stays distinguishable from it.
+    let level = |v: f64| {
+        let l = if scale > 0.0 {
+            (v / scale * dots as f64).round() as usize
+        } else {
+            0
+        };
+        l.clamp(1, dots)
+    };
+    // Dots lit for sample k: an inclusive range counted from the baseline.
+    let lit = |k: usize| -> Option<(usize, usize)> {
+        let lv = level(at(k)?);
+        match fill {
+            Fill::Area | Fill::Down => Some((0, lv - 1)),
+            Fill::Line => {
+                let pv = k.checked_sub(1).and_then(at).map_or(lv, level);
+                Some((lv.min(pv) - 1, lv.max(pv) - 1))
+            }
+        }
+    };
+    let ranges: Vec<_> = (0..w * per).map(lit).collect();
+    let cursor_cell = s.cursor.map(|c| (c + pad) / per);
+    const DOT: [[u32; 4]; 2] = [[0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80]];
+    let mut lines = Vec::with_capacity(rows);
+    for row in 0..rows {
+        let mut cells: Vec<String> = Vec::with_capacity(w);
+        for col in 0..w {
+            let mut bits = 0u32;
+            let mut any = false;
+            for side in 0..per {
+                let Some((lo, hi)) = ranges[col * per + side] else {
+                    continue;
+                };
+                let sub = if t.ascii { 1 } else { 4 };
+                for (d, bit) in DOT[side].iter().enumerate().take(sub) {
+                    // Dot index counted from the baseline of this chart.
+                    let from_top = row * sub + d;
+                    let i = match fill {
+                        Fill::Down => from_top,
+                        _ => dots - 1 - from_top,
+                    };
+                    if (lo..=hi).contains(&i) {
+                        bits |= bit;
+                        any = true;
+                    }
+                }
+            }
+            cells.push(if t.ascii {
+                (if any { "#" } else { " " }).to_string()
+            } else {
+                char::from_u32(0x2800 + bits).unwrap_or(' ').to_string()
+            });
+        }
+        let line = match cursor_cell {
+            Some(c) if c < w => Line::from(vec![
+                Span::styled(cells[..c].concat(), style),
+                Span::styled(
+                    if cells[c].trim_matches('\u{2800}').trim().is_empty() {
+                        "│".to_string()
+                    } else {
+                        cells[c].clone()
+                    },
+                    style.add_modifier(Modifier::REVERSED),
+                ),
+                Span::styled(cells[c + 1..].concat(), style),
+            ]),
+            _ => Line::from(Span::styled(cells.concat(), style)),
+        };
+        lines.push(line);
+    }
+    f.render_widget(Paragraph::new(lines), area);
+}
+
+/// Two series sharing one scale: the first grows up from the middle, the
+/// second hangs down (download/upload, read/write).
+#[allow(clippy::too_many_arguments)]
+fn mirrored(
+    f: &mut Frame,
+    area: Rect,
+    t: &Theme,
+    a: &Series,
+    b: &Series,
+    a_style: Style,
+    b_style: Style,
+) {
+    let scale = a.max.max(b.max).max(1.0);
+    let top_h = area.height.div_ceil(2);
+    let [top, bottom] =
+        Layout::vertical([Constraint::Length(top_h), Constraint::Min(0)]).areas(area);
+    chart(f, top, t, a, scale, Fill::Area, a_style);
+    chart(f, bottom, t, b, scale, Fill::Down, b_style);
+}
+
+/// A chart inside a titled box.
+#[allow(clippy::too_many_arguments)]
+fn boxed_chart(
+    f: &mut Frame,
+    area: Rect,
+    t: &Theme,
+    title: String,
+    s: &Series,
+    scale: f64,
+    fill: Fill,
+    style: Style,
+) {
+    let block = t.block("").title(Span::styled(title, t.bold()));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    chart(f, inner, t, s, scale, fill, style);
+}
+
+/// Samples that fit a box of `area` (borders excluded).
+fn boxed_samples(area: Rect, t: &Theme) -> usize {
+    area.width.saturating_sub(2) as usize * per_cell(t)
+}
+
+/// A titled card with rounded borders; returns its inner area.
+fn card(f: &mut Frame, area: Rect, t: &Theme, title: &str, style: Style) -> Rect {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_set(t.borders())
+        .border_style(t.border())
+        .title(Span::styled(
+            format!(" {title} "),
+            style.add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    inner
+}
+
+/// First line of a card: values on the left, context on the right.
+fn card_head(f: &mut Frame, area: Rect, left: Vec<Span>, right: String, t: &Theme) {
+    let row = Rect { height: 1, ..area };
+    let rw = (right.chars().count() as u16).min(row.width / 2);
+    let [l, r] = Layout::horizontal([Constraint::Min(0), Constraint::Length(rw)]).areas(row);
+    f.render_widget(Paragraph::new(Line::from(left)), l);
+    f.render_widget(
+        Paragraph::new(Span::styled(right, t.dim())).alignment(ratatui::layout::Alignment::Right),
+        r,
+    );
+}
+
+/// The area under a card's first `skip` lines.
+fn below(area: Rect, skip: u16) -> Rect {
+    let skip = skip.min(area.height);
+    Rect {
+        y: area.y + skip,
+        height: area.height - skip,
+        ..area
+    }
 }
 
 fn history_span(h: &[HistoryPoint], width: usize) -> String {
@@ -455,14 +661,41 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
     let h = app.history().to_vec();
     let cursor = app.cursor;
     let point = app.cursor_point().copied();
-    let rows_h = 2u16;
-    let show_procs = area.height >= 4 * (rows_h + 1) + 6;
+    let two_cols = area.width >= 100;
+    // Cards: 2x2 on wide terminals, stacked otherwise; the process table
+    // takes what is left when there is room for a useful number of rows.
+    let card_h: u16 = if two_cols {
+        if area.height >= 44 { 10 } else { 8 }
+    } else {
+        6
+    };
+    let cards_h = if two_cols { 2 * card_h } else { 4 * card_h };
+    let show_procs = area.height >= 1 + cards_h + 8;
+    let card_h = if show_procs {
+        card_h
+    } else if two_cols {
+        (area.height.saturating_sub(1) / 2).max(4)
+    } else {
+        (area.height.saturating_sub(1) / 4).max(3)
+    };
     let mut constraints = vec![Constraint::Length(1)];
-    constraints.extend(std::iter::repeat_n(Constraint::Length(rows_h + 1), 4));
+    let n_rows = if two_cols { 2 } else { 4 };
+    constraints.extend(std::iter::repeat_n(Constraint::Length(card_h), n_rows));
     constraints.push(Constraint::Min(0));
     let parts = Layout::vertical(constraints).split(area);
-    let label_w = 40u16.min(area.width / 2);
-    let spark_w = area.width.saturating_sub(label_w + 1) as usize;
+    let slots: Vec<Rect> = if two_cols {
+        parts[1..3]
+            .iter()
+            .flat_map(|r| {
+                let [a, b] = Layout::horizontal([Constraint::Percentage(50); 2]).areas(*r);
+                [a, b]
+            })
+            .collect()
+    } else {
+        parts[1..5].to_vec()
+    };
+    let per = per_cell(t);
+    let samples = slots[0].width.saturating_sub(2) as usize * per;
 
     // Timeline header line.
     // Alert events correlated with the timeline (observations, not causes).
@@ -509,9 +742,9 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
             });
             Line::from(Span::styled(
                 format!(
-                    "now {} · {}{last}",
+                    "now {} · charts show the {}{last}",
                     clock(s.timestamp_ms),
-                    history_span(&h, spark_w)
+                    history_span(&h, samples)
                 ),
                 t.dim(),
             ))
@@ -519,118 +752,147 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
     };
     f.render_widget(Paragraph::new(head), parts[0]);
 
-    let row = |i: usize| {
-        let [l, r] = Layout::horizontal([Constraint::Length(label_w), Constraint::Min(0)])
-            .spacing(1)
-            .areas(parts[i]);
-        (l, r)
-    };
-
     // CPU
-    let (l, r) = row(1);
-    let cpu_now = match &point {
-        Some(p) => vec![Line::from(vec![
-            Span::styled("CPU     ", t.cpu().add_modifier(Modifier::BOLD)),
-            Span::raw(p.cpu_pct.map_or("—".into(), |v| format!("{v:.1}%"))),
-        ])],
-        None => {
-            let cores = s.cpu.logical_cores.value.unwrap_or(0);
-            vec![
-                Line::from(vec![
-                    Span::styled("CPU     ", t.cpu().add_modifier(Modifier::BOLD)),
+    let inner = card(f, slots[0], t, "CPU", t.cpu());
+    let cores = s.cpu.logical_cores.value.unwrap_or(0);
+    let (left, right) = match &point {
+        Some(p) => (
+            vec![Span::styled(
+                p.cpu_pct.map_or("—".into(), |v| format!("{v:.1}%")),
+                t.cpu().add_modifier(Modifier::BOLD),
+            )],
+            String::new(),
+        ),
+        None => (
+            match s.cpu.usage.live() {
+                Some(c) => vec![
                     Span::styled(
-                        s.cpu.usage.live().map_or_else(
-                            || missing(&s.cpu.usage),
-                            |c| format!("{:.1}%", c.total_pct),
-                        ),
-                        t.bold(),
+                        format!("{:.1}%", c.total_pct),
+                        t.cpu().add_modifier(Modifier::BOLD),
                     ),
-                    Span::raw(s.cpu.usage.live().map_or(String::new(), |c| {
+                    Span::styled(
                         format!(
-                            "  usr {:.0} sys {:.0} io {:.0}",
+                            "  user {:.0} · system {:.0} · iowait {:.0}",
                             c.user_pct + c.nice_pct,
                             c.system_pct,
                             c.iowait_pct
-                        )
-                    })),
-                ]),
-                Line::from(Span::styled(
-                    format!(
-                        "        load {} / {cores} cores · psi {}",
-                        s.cpu
-                            .load
-                            .live()
-                            .map_or("—".into(), |l| format!("{:.2}", l.one)),
-                        pressure_short(&s.cpu.pressure)
+                        ),
+                        t.dim(),
                     ),
-                    t.dim(),
-                )),
-            ]
-        }
+                ],
+                None => vec![Span::styled(missing(&s.cpu.usage), t.dim())],
+            },
+            format!(
+                "load {} / {cores} cores · psi {}",
+                s.cpu
+                    .load
+                    .live()
+                    .map_or("—".into(), |l| format!("{:.2}", l.one)),
+                pressure_short(&s.cpu.pressure)
+            ),
+        ),
     };
-    f.render_widget(Paragraph::new(cpu_now), l);
-    let (bars, _) = series(&h, spark_w, cursor, |p| p.cpu_pct, 10.0);
-    f.render_widget(
-        spark(t, bars, 1000, t.cpu()),
-        Rect {
-            height: rows_h,
-            ..r
-        },
-    );
+    card_head(f, inner, left, right, t);
+    let cs = series(&h, samples, cursor, |p| p.cpu_pct);
+    chart(f, below(inner, 1), t, &cs, 100.0, Fill::Area, t.cpu());
 
-    // Memory
-    let (l, r) = row(2);
-    let mem_lines = match &point {
-        Some(p) => vec![Line::from(vec![
-            Span::styled("Memory  ", t.mem().add_modifier(Modifier::BOLD)),
-            Span::raw(
+    // Memory: a used / cache / free bar, then a line of used %.
+    let inner = card(f, slots[1], t, "Memory", t.mem());
+    let mut skip = 1;
+    match (&point, s.memory.usage.live()) {
+        (Some(p), _) => card_head(
+            f,
+            inner,
+            vec![Span::styled(
                 p.mem_used_pct
                     .map_or("—".into(), |v| format!("{v:.1}% used")),
-            ),
-        ])],
-        None => vec![
-            Line::from(vec![
-                Span::styled("Memory  ", t.mem().add_modifier(Modifier::BOLD)),
-                Span::styled(
-                    s.memory.usage.live().map_or_else(
-                        || missing(&s.memory.usage),
-                        |m| {
-                            format!(
-                                "{} / {} ({:.0}%)",
-                                units::bytes(m.used_bytes as f64),
-                                units::bytes(m.total_bytes as f64),
-                                m.used_pct
-                            )
-                        },
+                t.mem().add_modifier(Modifier::BOLD),
+            )],
+            String::new(),
+            t,
+        ),
+        (None, Some(m)) => {
+            let b = |v: u64| units::bytes(v as f64);
+            card_head(
+                f,
+                inner,
+                vec![
+                    Span::styled(
+                        format!("{} / {}", b(m.used_bytes), b(m.total_bytes)),
+                        t.mem().add_modifier(Modifier::BOLD),
                     ),
-                    t.bold(),
-                ),
-            ]),
-            Line::from(Span::styled(
+                    Span::styled(format!("  {:.0}%", m.used_pct), t.bold()),
+                ],
                 format!(
-                    "        avail {} · psi {}",
-                    s.memory
-                        .usage
-                        .live()
-                        .map_or("—".into(), |m| units::bytes(m.available_bytes as f64)),
+                    "available {} · psi {}",
+                    b(m.available_bytes),
                     pressure_short(&s.memory.pressure)
                 ),
-                t.dim(),
-            )),
-        ],
-    };
-    f.render_widget(Paragraph::new(mem_lines), l);
-    let (bars, _) = series(&h, spark_w, cursor, |p| p.mem_used_pct, 10.0);
-    f.render_widget(
-        spark(t, bars, 1000, t.mem()),
-        Rect {
-            height: rows_h,
-            ..r
-        },
-    );
+                t,
+            );
+            if inner.height >= 5 {
+                let w = inner.width as usize;
+                let total = m.total_bytes.max(1) as f64;
+                let free = m.free_bytes.unwrap_or(0).min(m.available_bytes);
+                let cache = m.available_bytes - free;
+                let cells = |v: u64| ((v as f64 / total) * w as f64).round() as usize;
+                let (u, c) = (cells(m.used_bytes).min(w), cells(cache));
+                let c = c.min(w - u);
+                let (on, mid, off) = if t.ascii {
+                    ("#", "+", ".")
+                } else {
+                    ("█", "▓", "░")
+                };
+                f.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(on.repeat(u), t.mem()),
+                        Span::styled(mid.repeat(c), t.mem().add_modifier(Modifier::DIM)),
+                        Span::styled(off.repeat(w - u - c), t.border()),
+                    ])),
+                    Rect {
+                        y: inner.y + 1,
+                        height: 1,
+                        ..inner
+                    },
+                );
+                let swap = s.memory.swap.live().map_or(String::new(), |w| {
+                    if w.total_bytes == 0 {
+                        " · no swap".into()
+                    } else {
+                        format!(" · swap {} / {}", b(w.used_bytes), b(w.total_bytes))
+                    }
+                });
+                f.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::styled(on, t.mem()),
+                        Span::styled(" used  ", t.dim()),
+                        Span::styled(mid, t.mem().add_modifier(Modifier::DIM)),
+                        Span::styled(format!(" cache {}  ", b(cache)), t.dim()),
+                        Span::styled(off, t.border()),
+                        Span::styled(format!(" free {}{swap}", b(free)), t.dim()),
+                    ])),
+                    Rect {
+                        y: inner.y + 2,
+                        height: 1,
+                        ..inner
+                    },
+                );
+                skip = 3;
+            }
+        }
+        (None, None) => card_head(
+            f,
+            inner,
+            vec![Span::styled(missing(&s.memory.usage), t.dim())],
+            String::new(),
+            t,
+        ),
+    }
+    let ms = series(&h, samples, cursor, |p| p.mem_used_pct);
+    chart(f, below(inner, skip), t, &ms, 100.0, Fill::Line, t.mem());
 
-    // Network: rx on line 1, tx on line 2.
-    let (l, r) = row(3);
+    // Network: download up, upload down.
+    let inner = card(f, slots[2], t, "Network", t.net());
     let (rx, tx) = match &point {
         Some(p) => (p.net_rx_bytes_per_s, p.net_tx_bytes_per_s),
         None => {
@@ -641,40 +903,40 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
             )
         }
     };
-    let net_status = if s.network.total.is_available() || point.is_some() {
-        String::new()
+    let rs = series(&h, samples, cursor, |p| p.net_rx_bytes_per_s);
+    let ts = series(&h, samples, cursor, |p| p.net_tx_bytes_per_s);
+    let (dn, upa) = if t.ascii {
+        ("rx ", "tx ")
     } else {
-        format!(" {}", missing(&s.network.total))
+        ("↓ ", "↑ ")
     };
-    f.render_widget(
-        Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled("Network ", t.net().add_modifier(Modifier::BOLD)),
-                Span::styled(format!("rx {}", opt_rate(rx, app.rate)), t.bold()),
-                Span::styled(net_status, t.dim()),
-            ]),
-            Line::from(vec![
-                Span::raw("        "),
-                Span::styled(format!("tx {}", opt_rate(tx, app.rate)), t.bold()),
-            ]),
-        ]),
-        l,
+    let mut left = vec![
+        Span::styled(
+            format!("{dn}{}", opt_rate(rx, app.rate)),
+            t.net().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("   {upa}{}", opt_rate(tx, app.rate)),
+            t.up().add_modifier(Modifier::BOLD),
+        ),
+    ];
+    if !s.network.total.is_available() && point.is_none() {
+        left.push(Span::styled(
+            format!("  {}", missing(&s.network.total)),
+            t.dim(),
+        ));
+    }
+    card_head(
+        f,
+        inner,
+        left,
+        format!("peak {}", units::rate(rs.max.max(ts.max), app.rate)),
+        t,
     );
-    let (b1, m1) = series(&h, spark_w, cursor, |p| p.net_rx_bytes_per_s, 1.0);
-    let (b2, m2) = series(&h, spark_w, cursor, |p| p.net_tx_bytes_per_s, 1.0);
-    let m = m1.max(m2);
-    f.render_widget(spark(t, b1, m, t.net()), Rect { height: 1, ..r });
-    f.render_widget(
-        spark(t, b2, m, t.net()),
-        Rect {
-            y: r.y + 1,
-            height: 1,
-            ..r
-        },
-    );
+    mirrored(f, below(inner, 1), t, &rs, &ts, t.net(), t.up());
 
-    // Disk
-    let (l, r) = row(4);
+    // Disk: read up, write down; how full / is.
+    let inner = card(f, slots[3], t, "Disk", t.disk());
     let (rd, wr) = match &point {
         Some(p) => (p.disk_read_bytes_per_s, p.disk_write_bytes_per_s),
         None => {
@@ -685,40 +947,39 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
             )
         }
     };
-    let psi = if point.is_none() {
-        format!("  psi {}", pressure_short(&s.storage.io_pressure))
-    } else {
-        String::new()
-    };
-    f.render_widget(
-        Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled("Disk    ", t.disk().add_modifier(Modifier::BOLD)),
-                Span::styled(format!("read {}", opt_rate(rd, RateUnit::Bytes)), t.bold()),
-            ]),
-            Line::from(vec![
-                Span::raw("        "),
-                Span::styled(format!("write {}", opt_rate(wr, RateUnit::Bytes)), t.bold()),
-                Span::styled(psi, t.dim()),
-            ]),
-        ]),
-        l,
-    );
-    let (b1, m1) = series(&h, spark_w, cursor, |p| p.disk_read_bytes_per_s, 1.0);
-    let (b2, m2) = series(&h, spark_w, cursor, |p| p.disk_write_bytes_per_s, 1.0);
-    let m = m1.max(m2);
-    f.render_widget(spark(t, b1, m, t.disk()), Rect { height: 1, ..r });
-    f.render_widget(
-        spark(t, b2, m, t.disk()),
-        Rect {
-            y: r.y + 1,
-            height: 1,
-            ..r
+    let rs = series(&h, samples, cursor, |p| p.disk_read_bytes_per_s);
+    let ws = series(&h, samples, cursor, |p| p.disk_write_bytes_per_s);
+    let root = s
+        .storage
+        .filesystems
+        .value
+        .as_ref()
+        .and_then(|v| v.iter().find(|fs| fs.mount_point == "/"))
+        .map_or(String::new(), |fs| format!("/ {:.0}% full · ", fs.used_pct));
+    card_head(
+        f,
+        inner,
+        vec![
+            Span::styled(
+                format!("R {}", opt_rate(rd, RateUnit::Bytes)),
+                t.disk().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("   W {}", opt_rate(wr, RateUnit::Bytes)),
+                t.write().add_modifier(Modifier::BOLD),
+            ),
+        ],
+        if point.is_none() {
+            format!("{root}psi {}", pressure_short(&s.storage.io_pressure))
+        } else {
+            String::new()
         },
+        t,
     );
+    mirrored(f, below(inner, 1), t, &rs, &ws, t.disk(), t.write());
 
     if show_procs {
-        process_table(f, parts[5], app, s, t, false);
+        process_table(f, parts[parts.len() - 1], app, s, t, false);
     }
 }
 
@@ -783,18 +1044,43 @@ fn process_table(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
     }
     app.scroll = app.scroll.min(rows.len().saturating_sub(inner_h));
     let wide = area.width >= 100;
-    let header_cells: Vec<&str> = if wide {
-        vec![
-            "PID", "USER", "CPU%", "RSS", "DISK R/s", "DISK W/s", "THR", "S", "NAME",
+    let total_mem = s
+        .memory
+        .usage
+        .live()
+        .map(|m| m.total_bytes as f64)
+        .filter(|t| *t > 0.0);
+    // (title, width, right-aligned)
+    let cols: &[(&str, u16, bool)] = if wide {
+        &[
+            ("PID", 8, true),
+            ("USER", 10, false),
+            ("CPU%", 6, true),
+            ("MEM%", 6, true),
+            ("RSS", 9, true),
+            ("DISK R/s", 10, true),
+            ("DISK W/s", 10, true),
+            ("THR", 4, true),
+            ("S", 1, false),
+            ("NAME", 0, false),
         ]
     } else {
-        vec!["PID", "CPU%", "RSS", "S", "NAME"]
+        &[
+            ("PID", 8, true),
+            ("CPU%", 6, true),
+            ("MEM%", 6, true),
+            ("RSS", 9, true),
+            ("S", 1, false),
+            ("NAME", 0, false),
+        ]
     };
-    let header = Row::new(
-        header_cells
-            .into_iter()
-            .map(|h| Cell::from(h).style(t.bold())),
-    );
+    let align = |text: String, right: bool| {
+        let l = Line::from(text);
+        if right { l.right_aligned() } else { l }
+    };
+    let header = Row::new(cols.iter().map(|(h, _, r)| {
+        Cell::from(align(h.to_string(), *r)).style(t.bold().add_modifier(Modifier::UNDERLINED))
+    }));
     let body: Vec<Row> = rows
         .iter()
         .enumerate()
@@ -802,7 +1088,12 @@ fn process_table(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
         .take(inner_h)
         .map(|(ri, (i, depth))| {
             let p = &table.entries[*i];
-            let cpu = p.cpu_pct.live().map_or("—".into(), |c| format!("{c:.1}"));
+            let cpu_v = p.cpu_pct.live().copied();
+            let cpu = Cell::from(align(cpu_v.map_or("—".into(), |c| format!("{c:.1}")), true))
+                .style(cpu_v.map_or(t.dim(), |c| t.heat(c)));
+            let mem_v = total_mem.map(|tm| p.rss_bytes as f64 / tm * 100.0);
+            let mem = Cell::from(align(mem_v.map_or("—".into(), |m| format!("{m:.1}")), true))
+                .style(mem_v.map_or(t.dim(), |m| t.heat(m)));
             let indent = if *depth > 0 {
                 format!(
                     "{}{}",
@@ -813,41 +1104,49 @@ fn process_table(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
                 String::new()
             };
             let pin = if app.is_pinned(&p.id) { "* " } else { "" };
-            let name = format!("{indent}{pin}{}", safe(&p.name));
-            let (r, w) = match p.disk_io.live() {
-                Some(d) => (
-                    units::rate(d.read_bytes_per_s, RateUnit::Bytes),
-                    units::rate(d.write_bytes_per_s, RateUnit::Bytes),
-                ),
-                None if p.disk_io.status == Status::PermissionDenied => {
-                    ("denied".into(), "denied".into())
+            let name = Cell::from(Line::from(vec![
+                Span::styled(indent, t.dim()),
+                Span::styled(pin, t.alert()),
+                Span::styled(safe(&p.name), t.bold()),
+            ]));
+            let io = |v: Option<f64>| match (v, p.disk_io.status) {
+                (Some(v), _) => Cell::from(align(units::rate(v, RateUnit::Bytes), true)),
+                (None, Status::PermissionDenied) => {
+                    Cell::from(align("denied".into(), true)).style(t.dim())
                 }
-                None => ("—".into(), "—".into()),
+                (None, _) => Cell::from(align("—".into(), true)).style(t.dim()),
             };
+            let d = p.disk_io.live();
+            let (r, w) = (
+                io(d.map(|d| d.read_bytes_per_s)),
+                io(d.map(|d| d.write_bytes_per_s)),
+            );
             let user = p
                 .user
                 .clone()
                 .unwrap_or_else(|| p.uid.map_or("?".into(), |u| u.to_string()));
+            let pid = Cell::from(align(p.id.pid.to_string(), true)).style(t.dim());
+            let rss = Cell::from(align(units::bytes(p.rss_bytes as f64), true));
+            let state = Cell::from(p.state.to_string()).style(if p.state == 'R' {
+                t.net()
+            } else {
+                t.dim()
+            });
             let cells: Vec<Cell> = if wide {
                 vec![
-                    Cell::from(p.id.pid.to_string()),
-                    Cell::from(trunc(&safe(&user), 10)),
-                    Cell::from(cpu),
-                    Cell::from(units::bytes(p.rss_bytes as f64)),
-                    Cell::from(r),
-                    Cell::from(w),
-                    Cell::from(p.threads.to_string()),
-                    Cell::from(p.state.to_string()),
-                    Cell::from(name),
+                    pid,
+                    Cell::from(trunc(&safe(&user), 10)).style(t.dim()),
+                    cpu,
+                    mem,
+                    rss,
+                    r,
+                    w,
+                    Cell::from(align(p.threads.to_string(), true)).style(t.dim()),
+                    state,
+                    name,
                 ]
             } else {
-                vec![
-                    Cell::from(p.id.pid.to_string()),
-                    Cell::from(cpu),
-                    Cell::from(units::bytes(p.rss_bytes as f64)),
-                    Cell::from(p.state.to_string()),
-                    Cell::from(name),
-                ]
+                vec![pid, cpu, mem, rss, state, name]
             };
             let row = Row::new(cells);
             if Some(ri) == sel && (full || app.selected.is_some()) {
@@ -857,32 +1156,21 @@ fn process_table(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
             }
         })
         .collect();
-    let widths: Vec<Constraint> = if wide {
-        vec![
-            Constraint::Length(8),
-            Constraint::Length(10),
-            Constraint::Length(6),
-            Constraint::Length(9),
-            Constraint::Length(10),
-            Constraint::Length(10),
-            Constraint::Length(4),
-            Constraint::Length(1),
-            Constraint::Min(10),
-        ]
-    } else {
-        vec![
-            Constraint::Length(8),
-            Constraint::Length(6),
-            Constraint::Length(9),
-            Constraint::Length(1),
-            Constraint::Min(8),
-        ]
-    };
+    let widths: Vec<Constraint> = cols
+        .iter()
+        .map(|(_, w, _)| {
+            if *w == 0 {
+                Constraint::Min(10)
+            } else {
+                Constraint::Length(*w)
+            }
+        })
+        .collect();
     f.render_widget(
         Table::new(body, widths)
             .header(header)
             .block(block)
-            .column_spacing(1),
+            .column_spacing(2),
         area,
     );
 }
@@ -999,32 +1287,41 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App, s: &Snapshot, t: &Theme) {
         )));
     }
     if let (Some(p), Some(c)) = (pinned, charts) {
-        let w = c.width.saturating_sub(2) as usize;
-        let pts: Vec<_> = p.points.iter().rev().take(w).rev().collect();
-        let cpu: Vec<SparklineBar> = pts
-            .iter()
-            .map(|x| SparklineBar::from(x.cpu_pct.map(|v| (v as f64 * 10.0) as u64)))
-            .collect();
+        let n = boxed_samples(c, t);
+        let pts: Vec<_> = p.points.iter().rev().take(n).rev().collect();
+        let cpu = Series {
+            vals: pts.iter().map(|x| x.cpu_pct.map(|v| v as f64)).collect(),
+            max: 100.0,
+            cursor: None,
+        };
         let rss_max = pts.iter().map(|x| x.rss_bytes).max().unwrap_or(1).max(1);
-        let rss: Vec<SparklineBar> = pts
-            .iter()
-            .map(|x| SparklineBar::from(Some(x.rss_bytes)))
-            .collect();
+        let rss = Series {
+            vals: pts.iter().map(|x| Some(x.rss_bytes as f64)).collect(),
+            max: rss_max as f64,
+            cursor: None,
+        };
         let [c1, c2] = Layout::vertical([Constraint::Length(3), Constraint::Length(3)]).areas(c);
         let cpu_max = pts.iter().filter_map(|x| x.cpu_pct).fold(0.0f32, f32::max);
         let exited = if p.exited { " · exited" } else { "" };
-        f.render_widget(
-            spark(t, cpu, 1000, t.cpu()).block(t.block("").title(format!(
-                " pinned CPU % of machine, 0-100 (max {cpu_max:.1}){exited} "
-            ))),
+        boxed_chart(
+            f,
             c1,
+            t,
+            format!(" pinned CPU % of machine, 0-100 (max {cpu_max:.1}){exited} "),
+            &cpu,
+            100.0,
+            Fill::Area,
+            t.cpu(),
         );
-        f.render_widget(
-            spark(t, rss, rss_max, t.mem()).block(t.block("").title(format!(
-                " pinned RSS (max {}) ",
-                units::bytes(rss_max as f64)
-            ))),
+        boxed_chart(
+            f,
             c2,
+            t,
+            format!(" pinned RSS (max {}) ", units::bytes(rss_max as f64)),
+            &rss,
+            rss_max as f64,
+            Fill::Line,
+            t.mem(),
         );
     }
     f.render_widget(
@@ -1099,16 +1396,17 @@ fn draw_cpu(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Theme) {
         t.dim(),
     )));
     let head_h = wrapped_height(&lines, area.width) + 1;
-    let [top, cores_area, chart] = Layout::vertical([
+    let col_w = 30u16;
+    let cols = (area.width.saturating_sub(2) / col_w).max(1) as usize;
+    let core_rows = c.per_core.len().div_ceil(cols) as u16;
+    let [top, cores_area, chart_area] = Layout::vertical([
         Constraint::Length(head_h),
-        Constraint::Min(0),
-        Constraint::Length(4),
+        Constraint::Length(core_rows + 2),
+        Constraint::Min(6),
     ])
     .areas(area);
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), top);
 
-    let col_w = 30u16;
-    let cols = (cores_area.width / col_w).max(1) as usize;
     let mut core_lines: Vec<Line> = Vec::new();
     for chunk in c.per_core.chunks(cols) {
         let spans: Vec<Span> = chunk
@@ -1140,11 +1438,16 @@ fn draw_cpu(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Theme) {
         cores_area,
     );
     let h = app.history().to_vec();
-    let w = chart.width.saturating_sub(2) as usize;
-    let (bars, _) = series(&h, w, app.cursor, |p| p.cpu_pct, 10.0);
-    f.render_widget(
-        spark(t, bars, 1000, t.cpu()).block(t.block(" CPU total, 0-100% ")),
-        chart,
+    let cs = series(&h, boxed_samples(chart_area, t), app.cursor, |p| p.cpu_pct);
+    boxed_chart(
+        f,
+        chart_area,
+        t,
+        " CPU total, 0-100% ".into(),
+        &cs,
+        100.0,
+        Fill::Area,
+        t.cpu(),
     );
 }
 
@@ -1224,23 +1527,36 @@ fn draw_memory(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Theme
     )));
     let [top, c1, c2] = Layout::vertical([
         Constraint::Length(wrapped_height(&lines, area.width) + 1),
-        Constraint::Length(4),
-        Constraint::Length(4),
+        Constraint::Fill(3),
+        Constraint::Fill(2),
     ])
     .areas(area);
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), top);
     let h = app.history().to_vec();
-    let w = c1.width.saturating_sub(2) as usize;
-    let (bars, _) = series(&h, w, app.cursor, |p| p.mem_used_pct, 10.0);
-    f.render_widget(
-        spark(t, bars, 1000, t.mem()).block(t.block(" Memory used, 0-100% ")),
+    let n = boxed_samples(c1, t);
+    let ms = series(&h, n, app.cursor, |p| p.mem_used_pct);
+    boxed_chart(
+        f,
         c1,
+        t,
+        " Memory used, 0-100% ".into(),
+        &ms,
+        100.0,
+        Fill::Line,
+        t.mem(),
     );
-    let (bars, _) = series(&h, w, app.cursor, |p| p.mem_pressure_some_pct, 10.0);
-    f.render_widget(
-        spark(t, bars, 1000, t.mem())
-            .block(t.block(" Memory pressure (PSI some, per interval), 0-100% ")),
+    let ps = series(&h, n, app.cursor, |p| p.mem_pressure_some_pct);
+    // Pressure is usually near zero: scale to its peak, at least 10%.
+    let scale = ps.max.max(10.0);
+    boxed_chart(
+        f,
         c2,
+        t,
+        format!(" Memory pressure (PSI some, per interval) · scale 0-{scale:.0}% "),
+        &ps,
+        scale,
+        Fill::Area,
+        t.mem(),
     );
 }
 
@@ -1248,8 +1564,8 @@ fn draw_network(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Them
     let [note, tbl, c1, c2] = Layout::vertical([
         Constraint::Length(2),
         Constraint::Min(4),
-        Constraint::Length(3),
-        Constraint::Length(3),
+        Constraint::Length(7),
+        Constraint::Length(7),
     ])
     .areas(area);
     f.render_widget(
@@ -1346,25 +1662,13 @@ fn draw_network(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Them
         tbl,
     );
     let h = app.history().to_vec();
-    let w = c1.width.saturating_sub(2) as usize;
-    let (b1, m1) = series(&h, w, app.cursor, |p| p.net_rx_bytes_per_s, 1.0);
-    let (b2, m2) = series(&h, w, app.cursor, |p| p.net_tx_bytes_per_s, 1.0);
-    let title1 = format!(
-        " Total receive · scale max {} ",
-        units::rate(m1 as f64, app.rate)
-    );
-    let title2 = format!(
-        " Total transmit · scale max {} ",
-        units::rate(m2 as f64, app.rate)
-    );
-    f.render_widget(
-        spark(t, b1, m1, t.net()).block(t.block("").title(title1)),
-        c1,
-    );
-    f.render_widget(
-        spark(t, b2, m2, t.net()).block(t.block("").title(title2)),
-        c2,
-    );
+    let n = boxed_samples(c1, t);
+    let rs = series(&h, n, app.cursor, |p| p.net_rx_bytes_per_s);
+    let ts = series(&h, n, app.cursor, |p| p.net_tx_bytes_per_s);
+    let title1 = format!(" Total receive · peak {} ", units::rate(rs.max, app.rate));
+    let title2 = format!(" Total transmit · peak {} ", units::rate(ts.max, app.rate));
+    boxed_chart(f, c1, t, title1, &rs, rs.max.max(1.0), Fill::Area, t.net());
+    boxed_chart(f, c2, t, title2, &ts, ts.max.max(1.0), Fill::Area, t.up());
 }
 
 fn draw_groups(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Theme) {
