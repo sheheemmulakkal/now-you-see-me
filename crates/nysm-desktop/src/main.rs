@@ -98,6 +98,8 @@ struct Args {
     page: Option<String>,
     theme: Option<Theme>,
     delay: Duration,
+    /// Development aid for demo captures: "watch" or "settings".
+    demo: Option<String>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -107,6 +109,7 @@ fn parse_args() -> Result<Args, String> {
         page: None,
         theme: None,
         delay: Duration::from_secs(4),
+        demo: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -130,6 +133,8 @@ fn parse_args() -> Result<Args, String> {
             // Development aid: render the window to a PNG and exit.
             "--screenshot" => a.screenshot = it.next().map(Into::into),
             "--page" => a.page = it.next(),
+            // Development aid for demo videos (scripts/demo/capture.sh).
+            "--demo" => a.demo = it.next(),
             "--delay" => {
                 a.delay = it
                     .next()
@@ -572,11 +577,36 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
     }
     window.present();
 
+    match args.demo.as_deref() {
+        // Watch this app's own live processes and show one in the details.
+        Some("watch") => {
+            stack.set_visible_child_name("processes");
+            let ui = ui.clone();
+            glib::timeout_add_local_once(Duration::from_secs(5), move || ui.demo_watch("nysm"));
+        }
+        // Open the Settings dialog; a screenshot then captures it.
+        Some("settings") => {
+            let (w, settings) = (window.clone(), settings.clone());
+            glib::timeout_add_local_once(Duration::from_millis(1500), move || {
+                settings::open(&w, &settings, attached)
+            });
+        }
+        _ => {}
+    }
+
     if let Some(path) = args.screenshot.clone() {
         let window = window.clone();
         let app = app.clone();
         glib::timeout_add_local_once(args.delay, move || {
-            match screenshot(&window, &path) {
+            // A dialog the main window opened (e.g. --demo settings), else
+            // the main window.
+            let main_w: gtk::Window = window.clone().upcast();
+            let dialog = gtk::Window::list_toplevels()
+                .into_iter()
+                .filter_map(|w| w.downcast::<gtk::Window>().ok())
+                .find(|w| *w != main_w && w.is_visible());
+            let shot = screenshot(dialog.as_ref().unwrap_or(&main_w), &path);
+            match shot {
                 Ok(()) => eprintln!("nysm-desktop: wrote {}", path.display()),
                 Err(e) => eprintln!("nysm-desktop: screenshot failed: {e}"),
             }
@@ -685,7 +715,7 @@ fn tick(
     }
 }
 
-fn screenshot(window: &gtk::ApplicationWindow, path: &std::path::Path) -> Result<(), String> {
+fn screenshot(window: &gtk::Window, path: &std::path::Path) -> Result<(), String> {
     // Snapshot the children directly instead of relying on the last painted
     // frame (headless backends may not paint without a viewer).
     let (w, h) = (window.width() as f32, window.height() as f32);

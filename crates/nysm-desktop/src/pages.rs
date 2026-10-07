@@ -846,6 +846,38 @@ impl Pages {
         *self.watch_cb.borrow_mut() = Some(Box::new(f));
     }
 
+    /// Demo captures: filter to `name`, watch the live processes whose
+    /// name contains it, and show the first in the details panel.
+    pub fn demo_watch(&self, name: &str) {
+        self.proc_search.set_text(name);
+        let snap = self.proc_state.borrow().last.clone();
+        let Some(t) = snap.as_ref().and_then(|s| s.processes.as_ref()) else {
+            return;
+        };
+        let mut live: Vec<_> = t
+            .entries
+            .iter()
+            .filter(|p| p.name.contains(name) && p.state != 'Z' && p.rss_bytes > 0)
+            .collect();
+        live.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.pid.cmp(&b.id.pid)));
+        live.dedup_by(|a, b| a.name == b.name);
+        for p in &live {
+            if let Some(f) = self.watch_cb.borrow().as_ref() {
+                f(p.id.clone(), Some(p.name.clone()));
+            }
+        }
+        if let Some(p) = live.first() {
+            {
+                let mut st = self.proc_state.borrow_mut();
+                st.details_for = Some((p.id.pid, p.id.start_ticks));
+                st.details_at = Some(std::time::Instant::now());
+            }
+            if let Some(f) = self.details_cb.borrow().as_ref() {
+                f(p.id.pid, p.id.start_ticks);
+            }
+        }
+    }
+
     /// The process whose details should be refreshed now (every second
     /// while the Processes page is shown), if any.
     pub fn details_due(&self) -> Option<(u32, u64)> {
