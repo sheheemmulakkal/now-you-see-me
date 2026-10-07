@@ -123,6 +123,8 @@ pub struct WireDetails {
     pub fd_limit: WireField<u64>,
     #[serde(default = "WireField::older_collector")]
     pub swap_bytes: WireField<u64>,
+    #[serde(default = "WireField::older_collector")]
+    pub memory: WireField<nysm_core::raw::ProcessMemory>,
 }
 
 impl<T> WireField<T> {
@@ -168,7 +170,8 @@ pub enum ServerMsg {
     },
     Details {
         request_id: u64,
-        result: Result<WireDetails, String>,
+        // Boxed: the details are much larger than the other messages.
+        result: Result<Box<WireDetails>, String>,
     },
     Pong,
     Error {

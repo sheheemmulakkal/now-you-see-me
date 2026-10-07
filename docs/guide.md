@@ -144,6 +144,15 @@ nysm watch               # one line per second, until Ctrl-C
 3. Look closer at one process: `nysm inspect --pid 1234` (TUI: select it and
    press `Enter`; desktop: double-click it).
 
+### …find which app uses the most memory?
+Processes page → sort by memory and turn on **Group by app**: one row per
+program (e.g. "chrome × 36") with summed CPU, MEM % and disk. Select a group to
+see its **real** memory: RSS sums count shared libraries once per process and
+overstate (Chrome: 4.8 GiB RSS sum vs 1.8 GiB real), so the details panel adds
+the PSS total (shared pages split fairly between processes) and the private
+part (USS, what closing the app would free). A single process shows the same
+split; `nysm inspect --pid N` prints it too.
+
 ### …watch one or more processes over time?
 In the desktop app, select processes on the Processes page (Ctrl/Shift-click
 for several) and press **Watch**: each gets a tile with live CPU and memory

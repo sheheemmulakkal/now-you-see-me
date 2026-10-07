@@ -268,3 +268,16 @@ pub struct RawCgroup {
     pub memory_pressure_some_us: Option<u64>,
     pub cpu_pressure_some_us: Option<u64>,
 }
+
+/// One process's memory split by sharing, from `/proc/<pid>/smaps_rollup`.
+/// RSS counts shared pages in every process that maps them; PSS divides
+/// each shared page between its users (sums to real usage across
+/// processes); USS is memory only this process uses (freed if it exits).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct ProcessMemory {
+    pub rss_bytes: u64,
+    pub pss_bytes: u64,
+    pub uss_bytes: u64,
+    /// Proportional share of swapped-out memory.
+    pub swap_pss_bytes: u64,
+}

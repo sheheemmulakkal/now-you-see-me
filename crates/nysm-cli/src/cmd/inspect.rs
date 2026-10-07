@@ -49,6 +49,8 @@ struct Output<'a> {
     /// `18446744073709551615` (u64::MAX) means unlimited.
     fd_limit: Field<u64>,
     swap_bytes: Field<u64>,
+    /// RSS/PSS/USS (bytes) from smaps_rollup.
+    memory: Field<nysm_core::raw::ProcessMemory>,
     /// Service/container/app the process belongs to (from its cgroup).
     #[serde(skip_serializing_if = "Option::is_none")]
     belongs_to: Option<BelongsTo>,
@@ -146,6 +148,7 @@ pub fn run(ctx: &Ctx, pid: u32, show_args: bool, json: bool, warmup: Duration) -
         open_fds: field(d.open_fds),
         fd_limit: field(d.fd_limit),
         swap_bytes: field(d.swap_bytes),
+        memory: field(d.memory),
         belongs_to,
         sockets: field(sockets),
         cmdline: d.cmdline.map(field),
@@ -321,6 +324,18 @@ pub fn run(ctx: &Ctx, pid: u32, show_args: bool, json: bool, warmup: Duration) -
             (Some(n), Some(l)) => format!("{n} of {l} allowed"),
             (Some(n), None) => n.to_string(),
             (None, _) => st.dim(&format!("— ({})", o.open_fds.status.label())),
+        },
+    )?;
+    row(
+        &mut out,
+        "memory split",
+        match &o.memory.value {
+            Some(m) => format!(
+                "PSS {} (fair share of shared pages) · USS {} (private; freed on exit)",
+                units::bytes(m.pss_bytes as f64),
+                units::bytes(m.uss_bytes as f64)
+            ),
+            None => st.dim(&format!("— ({})", o.memory.status.label())),
         },
     )?;
     row(

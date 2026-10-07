@@ -232,6 +232,7 @@ impl RemoteLive {
                                             open_fds: w.open_fds.into(),
                                             fd_limit: w.fd_limit.into(),
                                             swap_bytes: w.swap_bytes.into(),
+                                            memory: w.memory.into(),
                                         }),
                                         Err(m) => Err(if m.contains("no longer exists") {
                                             CollectError::Gone

@@ -51,6 +51,8 @@ pub struct ProcessDetails {
     pub fd_limit: CResult<u64>,
     /// Memory of this process currently in swap (`VmSwap`).
     pub swap_bytes: CResult<u64>,
+    /// RSS/PSS/USS split (`smaps_rollup`); only the owner (or root) may read it.
+    pub memory: CResult<nysm_core::raw::ProcessMemory>,
 }
 
 /// A platform's measurement surface. One instance is owned by one engine;

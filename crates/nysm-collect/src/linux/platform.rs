@@ -569,6 +569,15 @@ impl Platform for LinuxPlatform {
             open_fds,
             fd_limit: read_parsed("limits", parse::limits_open_files, "open-files limit"),
             swap_bytes: read_parsed("status", parse::status_vm_swap, "VmSwap"),
+            memory: {
+                let path = format!("{base}/smaps_rollup");
+                fs::read_to_string(&path)
+                    .map_err(|e| CollectError::from_io(&path, &e))
+                    .and_then(|t| {
+                        parse::smaps_rollup(&t)
+                            .ok_or_else(|| CollectError::Unsupported(format!("no Rss in {path}")))
+                    })
+            },
         })
     }
 

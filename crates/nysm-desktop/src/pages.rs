@@ -234,6 +234,8 @@ struct ProcState {
     /// Process shown in the details panel, refreshed while visible.
     details_for: Option<(u32, u64)>,
     details_at: Option<std::time::Instant>,
+    /// Program group shown in the details panel (group-by-app mode).
+    group_shown: Option<String>,
 }
 
 /// Most processes that can be watched at once (engine limit).
@@ -275,6 +277,7 @@ pub struct Pages {
     proc_table: ProcTable,
     proc_details: gtk::Label,
     watch_btn: gtk::Button,
+    group_btn: gtk::ToggleButton,
     watch_card: gtk::Box,
     watch_title: gtk::Label,
     watch_box: gtk::FlowBox,
@@ -415,6 +418,11 @@ impl Pages {
         ));
         bar.append(&proc_search);
         bar.append(&proc_sort);
+        let group_btn = gtk::ToggleButton::with_label("Group by app");
+        group_btn.set_tooltip_text(Some(
+            "One row per program (e.g. all chrome processes together) with summed CPU, memory and disk",
+        ));
+        bar.append(&group_btn);
         bar.append(&watch_btn);
         bar.append(&proc_count);
         pp.append(&bar);
@@ -690,6 +698,7 @@ impl Pages {
             proc_table,
             proc_details,
             watch_btn,
+            group_btn,
             watch_card,
             watch_title,
             watch_box,
@@ -702,6 +711,7 @@ impl Pages {
                 rendered_ts: None,
                 details_for: None,
                 details_at: None,
+                group_shown: None,
             })),
             details_cb: Rc::new(RefCell::new(None)),
             cpu_stats,
@@ -730,12 +740,13 @@ impl Pages {
 
     fn wire_process_controls(&self) {
         let rerender = {
-            let (st, list, count, search, sort) = (
+            let (st, list, count, search, sort, group) = (
                 self.proc_state.clone(),
                 self.proc_table.clone(),
                 self.proc_count.clone(),
                 self.proc_search.clone(),
                 self.proc_sort.clone(),
+                self.group_btn.clone(),
             );
             Rc::new(move || {
                 let snap = st.borrow().last.clone();
@@ -750,6 +761,7 @@ impl Pages {
                         sort_key(sort.selected()),
                         &prev,
                         shown,
+                        group.is_active(),
                     );
                     st.borrow_mut().rows = rows;
                 }
@@ -759,13 +771,21 @@ impl Pages {
         self.proc_search.connect_search_changed(move |_| r());
         let r = rerender.clone();
         self.proc_sort.connect_selected_notify(move |_| r());
+        let r = rerender.clone();
+        self.group_btn.connect_toggled(move |_| r());
         let (st, cb, details) = (
             self.proc_state.clone(),
             self.details_cb.clone(),
             self.proc_details.clone(),
         );
         self.proc_table.connect_activate(move |idx| {
-            let Some((pid, start)) = st.borrow().rows.get(idx).map(|r| (r.0, r.1)) else {
+            let Some((pid, start)) = st
+                .borrow()
+                .rows
+                .get(idx)
+                .map(|r| (r.0, r.1))
+                .filter(|r| r.0 != 0)
+            else {
                 return;
             };
             details.set_text(&format!("Loading details for PID {pid}…"));
@@ -792,9 +812,58 @@ impl Pages {
             if rows.len() != 1 {
                 return;
             }
-            let Some((pid, start)) = st.borrow().rows.get(rows[0]).map(|r| (r.0, r.1)) else {
+            let Some((pid, start, name)) = st.borrow().rows.get(rows[0]).cloned() else {
                 return;
             };
+            if pid == 0 {
+                // A program group: summarise its processes, then add the
+                // real (PSS) total computed once in the background.
+                if st.borrow().group_shown.as_deref() == Some(name.as_str()) {
+                    return; // same group (selection restored after a refresh)
+                }
+                {
+                    let mut s = st.borrow_mut();
+                    s.details_for = None;
+                    s.group_shown = Some(name.clone());
+                }
+                let Some(snap) = st.borrow().last.clone() else {
+                    return;
+                };
+                details.set_markup(&group_details(&snap, &name, None));
+                let pids: Vec<u32> = snap
+                    .processes
+                    .iter()
+                    .flat_map(|t| &t.entries)
+                    .filter(|p| p.name == name && p.state != 'Z')
+                    .map(|p| p.id.pid)
+                    .collect();
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let _ = tx.send(group_pss(&pids));
+                });
+                let (details, st) = (details.clone(), st.clone());
+                gtk::glib::timeout_add_local(
+                    std::time::Duration::from_millis(100),
+                    move || match rx.try_recv() {
+                        Ok(r) => {
+                            let current = st.borrow().group_shown.clone();
+                            let snap = st.borrow().last.clone();
+                            if current.as_deref() == Some(name.as_str())
+                                && let Some(snap) = snap
+                            {
+                                details.set_markup(&group_details(&snap, &name, Some(r)));
+                            }
+                            gtk::glib::ControlFlow::Break
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => {
+                            gtk::glib::ControlFlow::Continue
+                        }
+                        Err(_) => gtk::glib::ControlFlow::Break,
+                    },
+                );
+                return;
+            }
+            st.borrow_mut().group_shown = None;
             if st.borrow().details_for == Some((pid, start)) {
                 return; // same process (selection restored after a refresh)
             }
@@ -818,7 +887,7 @@ impl Pages {
             let rows = st.borrow().rows.clone();
             let free = MAX_WATCHED.saturating_sub(watched.get());
             for i in table.selected_rows().into_iter().take(free) {
-                if let Some((pid, start, name)) = rows.get(i)
+                if let Some((pid, start, name)) = rows.get(i).filter(|r| r.0 != 0)
                     && let Some(f) = cb.borrow().as_ref()
                 {
                     f(
@@ -844,6 +913,16 @@ impl Pages {
         f: impl Fn(nysm_core::raw::ProcessId, Option<String>) + 'static,
     ) {
         *self.watch_cb.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Demo captures: group by program, sort by memory, select the top app.
+    pub fn demo_group(&self) {
+        self.group_btn.set_active(true);
+        self.proc_sort.set_selected(1);
+        let table = self.proc_table.clone();
+        gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(400), move || {
+            table.select_rows(&[0]);
+        });
     }
 
     /// Demo captures: filter to `name`, watch the live processes whose
@@ -1024,6 +1103,16 @@ impl Pages {
                         (Err(e), _) => reason(e),
                     },
                 ));
+                if let Ok(mm) = &d.memory {
+                    rows.push((
+                        "Memory, shared split fairly (PSS) · private (USS)",
+                        format!(
+                            "{} · {}",
+                            units::bytes(mm.pss_bytes as f64),
+                            units::bytes(mm.uss_bytes as f64)
+                        ),
+                    ));
+                }
                 rows.push((
                     "Swap used",
                     match &d.swap_bytes {
@@ -1393,6 +1482,7 @@ impl Pages {
                     sort_key(self.proc_sort.selected()),
                     &prev,
                     shown,
+                    self.group_btn.is_active(),
                 );
                 let mut st = self.proc_state.borrow_mut();
                 st.rows = rows;
@@ -1828,6 +1918,104 @@ fn sort_key(i: u32) -> ProcessSort {
     }
 }
 
+/// Details-panel markup for a program group: totals and its largest
+/// processes. RSS sums count shared memory once per process.
+/// Real memory of a set of processes: (PSS sum, USS sum, readable, total).
+/// Reads each process's `smaps_rollup` once; other users' processes are
+/// not readable and are counted as such.
+fn group_pss(pids: &[u32]) -> (u64, u64, usize, usize) {
+    let (mut pss, mut uss, mut ok) = (0, 0, 0);
+    for pid in pids {
+        if let Some(m) = std::fs::read_to_string(format!("/proc/{pid}/smaps_rollup"))
+            .ok()
+            .and_then(|t| nysm_collect::linux::parse::smaps_rollup(&t))
+        {
+            pss += m.pss_bytes;
+            uss += m.uss_bytes;
+            ok += 1;
+        }
+    }
+    (pss, uss, ok, pids.len())
+}
+
+fn group_details(s: &Snapshot, name: &str, real: Option<(u64, u64, usize, usize)>) -> String {
+    use gtk::glib::markup_escape_text as esc;
+    let Some(t) = &s.processes else {
+        return String::new();
+    };
+    let mut members: Vec<_> = t
+        .entries
+        .iter()
+        .filter(|p| p.name == name && p.state != 'Z')
+        .collect();
+    members.sort_by(|a, b| b.rss_bytes.cmp(&a.rss_bytes));
+    let rss: u64 = members.iter().map(|p| p.rss_bytes).sum();
+    let cpu: f64 = members.iter().filter_map(|p| p.cpu_pct.live()).sum();
+    let total = s.memory.usage.live().map(|m| m.total_bytes).unwrap_or(0);
+    let dim = |t: &str| format!("<span size=\"small\" alpha=\"60%\">{}</span>", esc(t));
+    let mut m = format!(
+        "<b>{}</b>  {} processes\n\n{}\n{:.1}% of all cores\n\n{}\n{} resident{}\n\n",
+        esc(&safe(name)),
+        members.len(),
+        dim("CPU"),
+        cpu,
+        dim("Memory (sum of RSS)"),
+        units::bytes(rss as f64),
+        if total > 0 {
+            format!(" · {:.1}% of RAM", rss as f64 / total as f64 * 100.0)
+        } else {
+            String::new()
+        }
+    );
+    match real {
+        None => m.push_str(&dim("Real use (PSS sum): computing…")),
+        Some((pss, uss, ok, all)) if ok > 0 => {
+            m.push_str(&format!(
+                "{}\n<b>{}</b>{} · private {}",
+                dim("Real use (shared memory split fairly, PSS)"),
+                units::bytes(pss as f64),
+                if total > 0 {
+                    format!(" · {:.1}% of RAM", pss as f64 / total as f64 * 100.0)
+                } else {
+                    String::new()
+                },
+                units::bytes(uss as f64)
+            ));
+            if ok < all {
+                m.push_str(&format!(
+                    "\n{}",
+                    dim(&format!(
+                        "from {ok} of {all} processes (others belong to other users)"
+                    ))
+                ));
+            }
+        }
+        Some(_) => m.push_str(&dim("Real use: not readable (processes of another user)")),
+    }
+    m.push_str("\n\n");
+    m.push_str(&dim(
+        "The RSS sum counts shared libraries in every process, so it overstates; PSS does not.",
+    ));
+    m.push_str("\n\n");
+    m.push_str(&dim("Largest processes"));
+    for p in members.iter().take(10) {
+        m.push_str(&format!(
+            "\n{}  ·  {}  ·  CPU {}",
+            p.id.pid,
+            units::bytes(p.rss_bytes as f64),
+            p.cpu_pct.live().map_or("—".into(), |c| format!("{c:.1}%"))
+        ));
+    }
+    if members.len() > 10 {
+        m.push_str(&format!("\n… and {} more", members.len() - 10));
+    }
+    m
+}
+
+/// Rows of the process table: one per process, or with `group` one per
+/// process name ("chrome × 24") with summed CPU, memory and disk. Group
+/// rows carry PID 0 in their ids.
+#[allow(clippy::too_many_arguments)]
 fn render_processes(
     s: &Snapshot,
     table: &ProcTable,
@@ -1836,63 +2024,154 @@ fn render_processes(
     key: ProcessSort,
     prev: &[(u32, u64, String)],
     shown: Option<(u32, u64)>,
+    group: bool,
 ) -> RowIds {
     let Some(t) = &s.processes else {
         count.set_text("process list not available");
         table.set_rows(Vec::new());
         return Vec::new();
     };
+    let total_mem = s.memory.usage.live().map(|m| m.total_bytes).unwrap_or(0);
+    let mem_pct = |rss: u64| {
+        if total_mem > 0 {
+            format!("{:.1}", rss as f64 / total_mem as f64 * 100.0)
+        } else {
+            "—".into()
+        }
+    };
     let order = query::view(&t.entries, key, filter);
-    count.set_text(&format!("{} of {} shown", order.len(), t.entries.len()));
     let mut ids = Vec::with_capacity(order.len());
     let mut rows: Vec<proctable::Cells> = Vec::with_capacity(order.len());
-    for i in order {
-        let p = &t.entries[i];
-        let (r, w) = match p.disk_io.live() {
-            Some(d) => (
-                bytes_rate(d.read_bytes_per_s),
-                bytes_rate(d.write_bytes_per_s),
-            ),
-            None if p.disk_io.status == Status::PermissionDenied => {
-                ("denied".into(), "denied".into())
+    if group {
+        // name -> (count, cpu, rss, read, write, user or "several")
+        struct Agg {
+            n: usize,
+            cpu: f64,
+            rss: u64,
+            r: f64,
+            w: f64,
+            user: Option<String>,
+            several: bool,
+            first: usize,
+        }
+        let mut groups: Vec<(String, Agg)> = Vec::new();
+        let mut index: std::collections::HashMap<&str, usize> = Default::default();
+        for (pos, &i) in order.iter().enumerate() {
+            let p = &t.entries[i];
+            if p.state == 'Z' {
+                continue;
             }
-            None => ("—".into(), "—".into()),
-        };
-        rows.push([
-            safe(&p.name),
-            p.id.pid.to_string(),
-            safe(
-                &p.user
-                    .clone()
-                    .unwrap_or_else(|| p.uid.map_or("?".into(), |u| u.to_string())),
-            ),
-            p.cpu_pct.live().map_or("—".into(), |c| format!("{c:.1}")),
-            units::bytes(p.rss_bytes as f64),
-            r,
-            w,
-        ]);
-        ids.push((p.id.pid, p.id.start_ticks, p.name.clone()));
+            let k = *index.entry(p.name.as_str()).or_insert_with(|| {
+                groups.push((
+                    p.name.clone(),
+                    Agg {
+                        n: 0,
+                        cpu: 0.0,
+                        rss: 0,
+                        r: 0.0,
+                        w: 0.0,
+                        user: p.user.clone(),
+                        several: false,
+                        first: pos,
+                    },
+                ));
+                groups.len() - 1
+            });
+            let g = &mut groups[k].1;
+            g.n += 1;
+            g.cpu += p.cpu_pct.live().copied().unwrap_or(0.0);
+            g.rss += p.rss_bytes;
+            if let Some(d) = p.disk_io.live() {
+                g.r += d.read_bytes_per_s;
+                g.w += d.write_bytes_per_s;
+            }
+            if g.user != p.user {
+                g.several = true;
+            }
+        }
+        match key {
+            ProcessSort::Cpu => groups.sort_by(|a, b| b.1.cpu.total_cmp(&a.1.cpu)),
+            ProcessSort::Memory => groups.sort_by(|a, b| b.1.rss.cmp(&a.1.rss)),
+            ProcessSort::DiskIo => {
+                groups.sort_by(|a, b| (b.1.r + b.1.w).total_cmp(&(a.1.r + a.1.w)))
+            }
+            _ => groups.sort_by_key(|g| g.1.first),
+        }
+        count.set_text(&format!(
+            "{} apps · {} of {} processes",
+            groups.len(),
+            order.len(),
+            t.entries.len()
+        ));
+        for (name, g) in groups {
+            rows.push([
+                format!("{} × {}", safe(&name), g.n),
+                "—".into(),
+                if g.several {
+                    "several".into()
+                } else {
+                    safe(&g.user.clone().unwrap_or_else(|| "?".into()))
+                },
+                format!("{:.1}", g.cpu),
+                mem_pct(g.rss),
+                units::bytes(g.rss as f64),
+                bytes_rate(g.r),
+                bytes_rate(g.w),
+            ]);
+            ids.push((0, 0, name));
+        }
+    } else {
+        count.set_text(&format!("{} of {} shown", order.len(), t.entries.len()));
+        for i in order {
+            let p = &t.entries[i];
+            let (r, w) = match p.disk_io.live() {
+                Some(d) => (
+                    bytes_rate(d.read_bytes_per_s),
+                    bytes_rate(d.write_bytes_per_s),
+                ),
+                None if p.disk_io.status == Status::PermissionDenied => {
+                    ("denied".into(), "denied".into())
+                }
+                None => ("—".into(), "—".into()),
+            };
+            rows.push([
+                safe(&p.name),
+                p.id.pid.to_string(),
+                safe(
+                    &p.user
+                        .clone()
+                        .unwrap_or_else(|| p.uid.map_or("?".into(), |u| u.to_string())),
+                ),
+                p.cpu_pct.live().map_or("—".into(), |c| format!("{c:.1}")),
+                mem_pct(p.rss_bytes),
+                units::bytes(p.rss_bytes as f64),
+                r,
+                w,
+            ]);
+            ids.push((p.id.pid, p.id.start_ticks, p.name.clone()));
+        }
     }
     // Rows are re-sorted on every refresh; keep the selection on the same
-    // processes rather than the same positions.
-    let mut selected: Vec<(u32, u64)> = table
+    // processes (or groups) rather than the same positions.
+    let mut selected: Vec<(u32, u64, String)> = table
         .selected_rows()
         .into_iter()
-        .filter_map(|i| prev.get(i).map(|r| (r.0, r.1)))
+        .filter_map(|i| prev.get(i).cloned())
         .collect();
     // With no other selection, highlight the process shown in the details
     // panel whenever it is in the list (e.g. after a filter is cleared).
     if selected.is_empty()
-        && let Some(id) = shown
+        && let Some((pid, start)) = shown
+        && let Some(r) = ids.iter().find(|r| r.0 == pid && r.1 == start)
     {
-        selected.push(id);
+        selected.push(r.clone());
     }
     table.set_rows(rows);
     if !selected.is_empty() {
         let keep: Vec<usize> = ids
             .iter()
             .enumerate()
-            .filter(|(_, r)| selected.contains(&(r.0, r.1)))
+            .filter(|(_, r)| selected.contains(r))
             .map(|(i, _)| i)
             .collect();
         table.select_rows(&keep);

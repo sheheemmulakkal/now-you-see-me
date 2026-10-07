@@ -584,6 +584,12 @@ fn build(app: &gtk::Application, args: &Rc<Args>, settings: &Rc<nysm_config::Set
             let ui = ui.clone();
             glib::timeout_add_local_once(Duration::from_secs(5), move || ui.demo_watch("nysm"));
         }
+        // Group processes by program, largest memory first.
+        Some("group") => {
+            stack.set_visible_child_name("processes");
+            let ui = ui.clone();
+            glib::timeout_add_local_once(Duration::from_secs(5), move || ui.demo_group());
+        }
         // Open the Settings dialog; a screenshot then captures it.
         Some("settings") => {
             let (w, settings) = (window.clone(), settings.clone());

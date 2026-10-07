@@ -11,11 +11,12 @@ use gtk::prelude::*;
 
 /// (title, width in characters (0 = expanding), xalign).
 /// NAME comes first so it stays visible when the window is narrow.
-pub const COLUMNS: [(&str, i32, f32); 7] = [
+pub const COLUMNS: [(&str, i32, f32); 8] = [
     ("NAME", 0, 0.0),
     ("PID", 8, 1.0),
     ("USER", 10, 0.0),
     ("CPU %", 6, 1.0),
+    ("MEM %", 6, 1.0),
     ("RSS", 9, 1.0),
     ("READ/s", 10, 1.0),
     ("WRITE/s", 10, 1.0),

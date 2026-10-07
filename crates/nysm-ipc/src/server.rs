@@ -472,14 +472,15 @@ fn serve_conn(
                                 false,
                                 Duration::from_secs(3),
                             ) {
-                                Some(Ok(d)) => Ok(WireDetails {
+                                Some(Ok(d)) => Ok(Box::new(WireDetails {
                                     exe: d.exe.into(),
                                     cwd: d.cwd.into(),
                                     cgroup: d.cgroup.into(),
                                     open_fds: d.open_fds.into(),
                                     fd_limit: d.fd_limit.into(),
                                     swap_bytes: d.swap_bytes.into(),
-                                }),
+                                    memory: d.memory.into(),
+                                })),
                                 Some(Err(e)) => Err(e.to_string()),
                                 None => Err("collector busy".into()),
                             };

@@ -424,6 +424,36 @@ pub fn limits_open_files(text: &str) -> Option<u64> {
     }
 }
 
+/// `/proc/<pid>/smaps_rollup` into RSS/PSS/USS/swap (bytes).
+pub fn smaps_rollup(text: &str) -> Option<nysm_core::raw::ProcessMemory> {
+    let mut m = nysm_core::raw::ProcessMemory::default();
+    let mut seen = false;
+    for line in text.lines() {
+        let Some((key, rest)) = line.split_once(':') else {
+            continue;
+        };
+        let Some(kb) = rest
+            .split_whitespace()
+            .next()
+            .and_then(|v| v.parse::<u64>().ok())
+        else {
+            continue;
+        };
+        let b = kb * 1024;
+        match key {
+            "Rss" => {
+                m.rss_bytes = b;
+                seen = true;
+            }
+            "Pss" => m.pss_bytes = b,
+            "Private_Clean" | "Private_Dirty" => m.uss_bytes += b,
+            "SwapPss" => m.swap_pss_bytes = b,
+            _ => {}
+        }
+    }
+    seen.then_some(m)
+}
+
 /// `VmSwap` from `/proc/<pid>/status`, in bytes. Absent for kernel threads.
 pub fn status_vm_swap(text: &str) -> Option<u64> {
     let rest = text.lines().find_map(|l| l.strip_prefix("VmSwap:"))?;
@@ -451,6 +481,19 @@ pub fn passwd(text: &str) -> Vec<(u32, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn smaps_rollup_splits_shared_and_private() {
+        let t = "5cc8-7fff ---p 00000000 00:00 0  [rollup]\nRss:   1788 kB\nPss:    124 kB\n\
+                 Pss_Anon:  104 kB\nShared_Clean: 1684 kB\nPrivate_Clean: 0 kB\nPrivate_Dirty: 104 kB\n\
+                 Swap: 8 kB\nSwapPss: 4 kB\n";
+        let m = smaps_rollup(t).unwrap();
+        assert_eq!(m.rss_bytes, 1788 * 1024);
+        assert_eq!(m.pss_bytes, 124 * 1024);
+        assert_eq!(m.uss_bytes, 104 * 1024);
+        assert_eq!(m.swap_pss_bytes, 4 * 1024);
+        assert!(smaps_rollup("").is_none());
+    }
 
     #[test]
     fn process_limits_and_swap() {
