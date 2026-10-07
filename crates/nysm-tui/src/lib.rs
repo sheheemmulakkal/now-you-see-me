@@ -28,6 +28,9 @@ pub struct Options {
     pub attach: Attach,
     /// Monitor a remote machine through this command (e.g. ssh … stdio).
     pub remote: Option<std::process::Command>,
+    /// Ask Docker/Podman for container names while the Groups view is
+    /// open (`display.container_names`; the socket is root-equivalent).
+    pub container_names: bool,
 }
 
 pub fn color_enabled() -> bool {
@@ -78,7 +81,32 @@ fn event_loop(
     let mut last_draw = Instant::now() - frame_min;
     let mut pending: Option<DetailsRx> = None;
     let mut cgroups_on = false;
+    // Container names: one read-only request every 30 s while Groups is open.
+    let mut names_rx: Option<mpsc::Receiver<nysm_collect::CResult<app::NameMap>>> = None;
+    let mut names_at: Option<Instant> = None;
     loop {
+        if opts.container_names && !remote_mode && app.tab == app::Tab::Groups {
+            if let Some(rx) = &names_rx
+                && let Ok(r) = rx.try_recv()
+            {
+                if let Ok(m) = r {
+                    app.container_names = m;
+                    dirty = true;
+                }
+                names_rx = None;
+            }
+            if names_rx.is_none() && names_at.is_none_or(|t| t.elapsed() >= Duration::from_secs(30))
+            {
+                let (tx, rx) = mpsc::channel();
+                std::thread::spawn(move || {
+                    let _ = tx.send(nysm_collect::runtime::container_names(Duration::from_secs(
+                        3,
+                    )));
+                });
+                names_rx = Some(rx);
+                names_at = Some(Instant::now());
+            }
+        }
         // Only pay for cgroup scans while the Groups view is open.
         let want_cg = app.tab == app::Tab::Groups;
         if want_cg != cgroups_on {

@@ -348,7 +348,7 @@ pub enum DiskAction {
     Usage {
         path: std::path::PathBuf,
         /// Number of entries to show.
-        #[arg(long, default_value_t = 20)]
+        #[arg(long, visible_alias = "limit", default_value_t = 20)]
         top: usize,
         /// Stop after visiting this many entries.
         #[arg(long, default_value_t = 2_000_000)]
@@ -420,6 +420,7 @@ pub enum ConfigAction {
         force: bool,
     },
     /// Validate the config file; exit 2 if invalid.
+    #[command(visible_alias = "validate")]
     Check,
     /// Set one value, e.g. `sampling.interval 2s` or `display.theme dark`.
     /// Keeps the file's comments; refuses invalid values and invalid files.
@@ -672,6 +673,7 @@ fn main() -> ExitCode {
                 ascii: ascii || ctx.settings.ascii,
                 max_fps: max_fps.clamp(1, 60),
                 rate: ctx.rate,
+                container_names: ctx.settings.container_names,
                 remote: remote.map(|dest| {
                     let mut c = std::process::Command::new("ssh");
                     // -T: no remote tty (binary protocol on stdout).

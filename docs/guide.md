@@ -30,7 +30,7 @@ Contents
 | --- | --- | --- |
 | **Command line** | `nysm summary`, `nysm processes`, … | Quick answers, scripts, servers, JSON output |
 | **Terminal UI** | `nysm tui` | Watching live with charts, in a terminal or over SSH |
-| **Tray indicator** | `nysm-tray` | An always-visible CPU/memory meter in the top bar |
+| **Tray indicator** | `nysm-tray` | Always-visible CPU, memory, network, storage and disk values in the top bar |
 | **Desktop app** | `nysm-desktop` | A full graphical window with charts and tables (GTK 4) |
 | **GNOME extension** | optional | Compact indicators inside GNOME Shell's panel |
 | **Collector service** | `nysm service run` | One shared background sampler for all of the above |
@@ -261,6 +261,16 @@ nysm config check      # is the config file valid?
 Views: `1` Overview · `2` Processes · `3` CPU · `4` Memory · `5` Network ·
 `6` Disk · `7` Containers & services. `Tab` / `Shift-Tab` cycle.
 
+The overview has a box per resource (two per row from 80 columns): the
+current value, a short explanation, and a chart of the last minutes. Each bar
+is one sample. CPU and memory charts are labelled `100%` / `0%` with a dotted
+line at 100%; network and disk show download `↓` / upload `↑` and read `R` /
+write `W` on one scale (its peak is printed above). A `·` on the baseline
+means no data for that moment, not zero. In the process table `…` means the
+first rate is still being measured and `—` that it is not available.
+With `display.container_names = true` the Groups view names containers
+(`infra-api-1 (1ffec9e0869c)`).
+
 | Key | Action |
 | --- | --- |
 | `Space` or `p` | pause the display (collection continues) |
@@ -285,10 +295,11 @@ Icons with live values in the top bar: CPU `24%`, memory `6.2G`, network
 (*Top bar* submenu: items including disk read/write, icons/names, compact
 strip); the choice is saved. `--meter` gives one compact two-bar icon;
 `--no-label` icons only. The menu itself is short: *Open monitor*, *Top bar*,
-*Quit*, plus a line when values stop updating or an alert fires. A `⚠` appears while an alert fires. Text in the bar needs
-Ubuntu's AppIndicator host; other desktops show the icons.
-Click it for *Open monitor*, the *Top bar* settings and *Quit*. Works on Ubuntu GNOME (built-in AppIndicator support), KDE,
-XFCE and other StatusNotifier desktops ([tray.md](tray.md)).
+*Quit*, plus a line when values stop updating or an alert fires. A `⚠`
+appears while an alert fires. Text in the bar needs Ubuntu's AppIndicator
+host; other desktops show the icons. Works on Ubuntu GNOME (built-in
+AppIndicator support), KDE, XFCE and other StatusNotifier desktops
+([tray.md](tray.md)).
 
 ### Desktop app (`nysm-desktop`)
 Pages: Overview, CPU, Memory, Network, Storage, Containers & services,

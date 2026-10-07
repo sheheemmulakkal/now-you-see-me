@@ -60,8 +60,13 @@ pub struct Details {
     pub result: Option<CResult<ProcessDetails>>,
 }
 
+/// Container id → runtime info, for naming containers in the Groups view.
+pub type NameMap = std::collections::HashMap<String, nysm_collect::runtime::ContainerInfo>;
+
 pub struct App {
     pub tab: Tab,
+    /// Runtime names for containers (empty unless enabled in the config).
+    pub container_names: NameMap,
     /// Latest snapshot from the collector.
     pub live: Option<Arc<Snapshot>>,
     pub live_history: Vec<HistoryPoint>,
@@ -100,6 +105,7 @@ impl App {
     pub fn new(ascii: bool, color: bool, rate: nysm_core::units::RateUnit) -> Self {
         App {
             tab: Tab::Overview,
+            container_names: NameMap::new(),
             live: None,
             live_history: Vec::new(),
             paused: None,

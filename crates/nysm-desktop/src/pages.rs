@@ -212,6 +212,15 @@ fn card(title: &str) -> (gtk::Box, gtk::Box) {
     (c, header)
 }
 
+/// A row for legends under a card title. Legends sit on their own row, not
+/// beside the title, so a card stays narrow enough for a half-screen
+/// window instead of forcing the page to scroll sideways.
+fn legend_row(card: &gtk::Box) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    card.append(&row);
+    row
+}
+
 /// Legend entry "● Name value" with the series colour on the dot.
 fn legend(header: &gtk::Box, name: &str, dot_class: &str) -> gtk::Label {
     let dot = label("●", &[dot_class]);
@@ -358,9 +367,10 @@ impl Pages {
         mem_card.append(&mem_detail);
         grid.attach(&mem_card, 0, 0, 1, 1);
 
-        let (net_card, net_head) = card("Network (throughput)");
-        let net_rx = legend(&net_head, "Download", "c-net-rx");
-        let net_tx = legend(&net_head, "Upload", "c-net-tx");
+        let (net_card, _) = card("Network (throughput)");
+        let net_legend = legend_row(&net_card);
+        let net_rx = legend(&net_legend, "Download", "c-net-rx");
+        let net_tx = legend(&net_legend, "Upload", "c-net-tx");
         let net_ov_chart = Chart::new(120, None, net_fmt);
         net_card.append(&net_ov_chart.area);
         grid.attach(&net_card, 1, 0, 1, 1);
@@ -377,9 +387,10 @@ impl Pages {
         fs_card.append(&fs_detail);
         grid.attach(&fs_card, 0, 1, 1, 1);
 
-        let (disk_card, disk_head) = card("Disk activity");
-        let disk_r = legend(&disk_head, "Read", "c-disk-r");
-        let disk_w = legend(&disk_head, "Write", "c-disk-w");
+        let (disk_card, _) = card("Disk activity");
+        let disk_legend = legend_row(&disk_card);
+        let disk_r = legend(&disk_legend, "Read", "c-disk-r");
+        let disk_w = legend(&disk_legend, "Write", "c-disk-w");
         let disk_ov_chart = Chart::new(120, None, bytes_rate);
         disk_card.append(&disk_ov_chart.area);
         grid.attach(&disk_card, 1, 1, 1, 1);
@@ -640,6 +651,7 @@ impl Pages {
         let groups_count = label("", &["dim-label"]);
         groups_count.set_hexpand(true);
         groups_count.set_wrap(false);
+        groups_count.set_ellipsize(gtk::pango::EllipsizeMode::End);
         gbar.append(&groups_kind);
         gbar.append(&groups_sort);
         gbar.append(&groups_count);
@@ -664,7 +676,13 @@ impl Pages {
         let groups_list = gtk::ListBox::new();
         groups_list.set_selection_mode(gtk::SelectionMode::None);
         groups_list.add_css_class("flat-list");
-        gcard.append(&groups_list);
+        // The table scrolls sideways on its own, so the toolbar above it
+        // (filters, "Container names") stays in view on narrow windows.
+        let groups_scroll = gtk::ScrolledWindow::new();
+        groups_scroll.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Never);
+        groups_scroll.set_propagate_natural_height(true);
+        groups_scroll.set_child(Some(&groups_list));
+        gcard.append(&groups_scroll);
         gp.append(&gcard);
 
         let pages = Pages {

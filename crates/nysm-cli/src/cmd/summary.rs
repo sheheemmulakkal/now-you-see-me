@@ -230,31 +230,58 @@ pub fn render(ctx: &Ctx, s: &Snapshot, out: &mut impl Write) -> io::Result<()> {
         st.dim(&format!("[{}]", counted.join(", ")))
     )?;
     if let Some(ifs) = s.network.interfaces.live() {
-        let others: Vec<String> = ifs
+        let others: Vec<_> = ifs
             .iter()
-            .filter(|i| {
-                !i.counted_in_total
-                    && i.rates
-                        .live()
-                        .is_some_and(|r| r.rx_bytes_per_s + r.tx_bytes_per_s > 0.0)
-            })
-            .map(|i| {
-                let r = i.rates.live().unwrap();
-                format!(
-                    "{} ({}) rx {} tx {}",
-                    fmt::safe(&i.name),
-                    i.kind.label(),
-                    fmt::rate(r.rx_bytes_per_s, ctx.rate),
-                    fmt::rate(r.tx_bytes_per_s, ctx.rate)
-                )
+            .filter_map(|i| {
+                let r = i.rates.live()?;
+                (!i.counted_in_total && r.rx_bytes_per_s + r.tx_bytes_per_s > 0.0).then_some((i, r))
             })
             .collect();
-        if !others.is_empty() {
+        // A few interfaces are listed by name; many (one veth per container)
+        // are summed per kind so the line stays readable.
+        let parts: Vec<String> = if others.len() <= 3 {
+            others
+                .iter()
+                .map(|(i, r)| {
+                    format!(
+                        "{} ({}) rx {} tx {}",
+                        fmt::safe(&i.name),
+                        i.kind.label(),
+                        fmt::rate(r.rx_bytes_per_s, ctx.rate),
+                        fmt::rate(r.tx_bytes_per_s, ctx.rate)
+                    )
+                })
+                .collect()
+        } else {
+            let mut kinds: Vec<(&str, usize, f64, f64)> = Vec::new();
+            for (i, r) in &others {
+                let k = i.kind.label();
+                match kinds.iter_mut().find(|e| e.0 == k) {
+                    Some(e) => {
+                        e.1 += 1;
+                        e.2 += r.rx_bytes_per_s;
+                        e.3 += r.tx_bytes_per_s;
+                    }
+                    None => kinds.push((k, 1, r.rx_bytes_per_s, r.tx_bytes_per_s)),
+                }
+            }
+            kinds
+                .iter()
+                .map(|(k, n, rx, tx)| {
+                    format!(
+                        "{n} {k} rx {} tx {}",
+                        fmt::rate(*rx, ctx.rate),
+                        fmt::rate(*tx, ctx.rate)
+                    )
+                })
+                .collect()
+        };
+        if !parts.is_empty() {
             writeln!(
                 out,
                 "{:9}{}",
                 "",
-                st.dim(&format!("not in total: {}", others.join("; ")))
+                st.dim(&format!("not in total: {}", parts.join("; ")))
             )?;
         }
     }

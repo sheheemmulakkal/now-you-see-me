@@ -145,8 +145,8 @@ pub fn build(page: &gtk::Box, history: Duration, interval: Duration) -> About {
     procs.set_row_spacing(4);
     cost.append(&procs);
     cost.append(&label(
-        "<small>CPU is a share of one core. Reference (Intel i5-7500): collector ~0.2 % and \
-         3 MiB, top bar 0.03–0.2 % and 5 MiB, a window ~2 % while visible and nothing while \
+        "<small>CPU is a share of one core. Reference (Intel i5-7500): collector 0.2–0.4 % and \
+         3 MiB (about 0.8 % while a process list is open), top bar 0.03–0.2 % and 5 MiB, a window ~2 % while visible and nothing while \
          minimised; GNOME Shell spends ~1 % more to redraw the top bar. Pages you are not \
          looking at are not updated.</small>",
         &["dim-label"],

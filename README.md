@@ -37,7 +37,7 @@ Values that cannot be measured are shown with the reason, never as a fake `0`.
 | --- | --- |
 | `nysm` | one-shot summary and focused commands (`processes`, `ports`, `record`, …) |
 | `nysm tui` | interactive terminal UI with charts |
-| `nysm-tray` | CPU/memory meter in the top bar (any StatusNotifier desktop) |
+| `nysm-tray` | live CPU, memory, network, storage and disk values in the top bar (any StatusNotifier desktop) |
 | `nysm-desktop` | GTK 4 desktop app |
 | `nysm service run` | optional shared collector that all of the above attach to |
 | GNOME extension | optional panel indicators |

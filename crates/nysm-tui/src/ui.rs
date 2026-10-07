@@ -549,7 +549,7 @@ fn thin_bars(
         return;
     }
     let (full, half, none) = if t.ascii {
-        ("|", ".", ".")
+        ("|", ".", ":")
     } else {
         ("┃", "╻", "·")
     };
@@ -824,6 +824,12 @@ fn panel_charts(f: &mut Frame, area: Rect, t: &Theme, p: &Panel) {
             // not full level (89%) still shows a gap below it.
             label(f, gutter.y, "100%", t.dim());
             label(f, gutter.y + gutter.height.saturating_sub(1), "0%", t.dim());
+            // Short charts keep every row for bars (the line is drawn
+            // inline where no bar reaches).
+            if area.height < 3 {
+                thin_bars(f, area, t, a, p.scale, true, *sa);
+                return;
+            }
             let line = Rect { height: 1, ..area };
             f.render_widget(
                 Paragraph::new(Span::styled(
@@ -892,7 +898,14 @@ fn overview_boxes(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Th
             height: box_h,
         };
         let inner = card(f, r, t, p.title, p.style);
-        let mut lines = vec![Line::from(p.value.clone()), Line::from(p.detail.clone())];
+        let detail: String = p.detail.iter().map(|s| s.content.as_ref()).collect();
+        let mut lines = vec![
+            Line::from(p.value.clone()),
+            Line::from(Span::styled(
+                fit_parts(&detail, inner.width as usize),
+                t.dim(),
+            )),
+        ];
         // The gauge repeats the chart's latest level: drop it when space is short.
         if let Some(pct) = p.pct
             && inner.height >= 7
@@ -1362,12 +1375,25 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App, s: &Snapshot, t: &Theme) {
     );
 }
 
-fn bar_text(t: &Theme, pct: f64, width: usize) -> String {
-    let filled = ((pct / 100.0) * width as f64)
-        .round()
-        .clamp(0.0, width as f64) as usize;
-    let (on, off) = if t.ascii { ("#", ".") } else { ("█", "░") };
-    format!("{}{}", on.repeat(filled), off.repeat(width - filled))
+/// "a · b · c" cut to whole parts that fit `width`, never mid-word.
+fn fit_parts(text: &str, width: usize) -> String {
+    let mut out = String::new();
+    for part in text.split(" · ") {
+        let next = if out.is_empty() {
+            part.to_string()
+        } else {
+            format!("{out} · {part}")
+        };
+        if next.chars().count() > width {
+            break;
+        }
+        out = next;
+    }
+    if out.is_empty() {
+        trunc(text, width)
+    } else {
+        out
+    }
 }
 
 fn draw_cpu(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Theme) {
@@ -1447,18 +1473,14 @@ fn draw_cpu(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Theme) {
                     .frequency_mhz
                     .live()
                     .map_or("".into(), |m| format!("{:.1}G", m / 1000.0));
-                vec![
-                    Span::styled(format!("{:>4} ", format!("{}", core.id)), t.dim()),
-                    Span::styled(
-                        bar_text(t, pct.unwrap_or(0.0), 10),
-                        if pct.is_some() { t.cpu() } else { t.dim() },
-                    ),
-                    Span::raw(format!(
-                        " {:>5} {:<5}  ",
-                        pct.map_or("—".into(), |p| format!("{p:.0}%")),
-                        freq
-                    )),
-                ]
+                let mut v = vec![Span::styled(format!("{:>4}", core.id), t.dim())];
+                v.extend(gauge(t, pct, 12).spans);
+                v.push(Span::raw(format!(
+                    " {:>5} {:<5}  ",
+                    pct.map_or("—".into(), |p| format!("{p:.0}%")),
+                    freq
+                )));
+                v
             })
             .collect();
         core_lines.push(Line::from(spans));
@@ -1733,7 +1755,14 @@ fn draw_groups(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Theme
             let near = matches!((g.memory_bytes, g.memory_max_bytes), (Some(v), Some(m)) if m > 0 && v as f64 / m as f64 >= 0.9);
             let mut cells = vec![
                 Cell::from(g.kind.label()),
-                Cell::from(safe(&g.name)),
+                Cell::from(safe(
+                    &match nysm_collect::runtime::container_id(&g.path)
+                        .and_then(|id| app.container_names.get(id).map(|c| (id, c)))
+                    {
+                        Some((id, c)) => nysm_collect::runtime::label(&c.name, id),
+                        None => g.name.clone(),
+                    },
+                )),
                 Cell::from(g.cpu_pct.live().map_or("—".into(), |c| format!("{c:.1}"))),
                 Cell::from(g.cpu_limit_cores.map_or("".into(), |c| format!("{c:.2}c"))),
                 Cell::from(mem).style(if near { t.alert() } else { Style::default() }),
@@ -1906,14 +1935,13 @@ fn draw_disk(f: &mut Frame, area: Rect, _app: &mut App, s: &Snapshot, t: &Theme)
                 Style::default()
             };
             Row::new(vec![
-                Cell::from(trunc(&safe(&fs.mount_point), 20)),
+                Cell::from(trunc(&safe(&fs.mount_point), 16)),
                 Cell::from(trunc(&safe(&fs.fs_type), 6)),
-                Cell::from(format!(
-                    "{} {:>5.1}%",
-                    bar_text(t, fs.used_pct, 6),
-                    fs.used_pct
-                ))
-                .style(style),
+                Cell::from(Line::from({
+                    let mut v = gauge(t, Some(fs.used_pct), 7).spans;
+                    v.push(Span::styled(format!("{:>3.0}%", fs.used_pct), style));
+                    v
+                })),
                 Cell::from(units::bytes(fs.used_bytes as f64)),
                 Cell::from(units::bytes(fs.available_bytes as f64)),
                 Cell::from(units::bytes(fs.total_bytes as f64)),
@@ -1927,12 +1955,12 @@ fn draw_disk(f: &mut Frame, area: Rect, _app: &mut App, s: &Snapshot, t: &Theme)
     ])
     .style(t.bold());
     let widths = [
-        Constraint::Length(20),
+        Constraint::Length(16),
         Constraint::Length(6),
-        Constraint::Length(13),
-        Constraint::Length(9),
-        Constraint::Length(9),
-        Constraint::Length(9),
+        Constraint::Length(11),
+        Constraint::Length(8),
+        Constraint::Length(8),
+        Constraint::Length(8),
         Constraint::Length(2),
         Constraint::Min(10),
     ];
