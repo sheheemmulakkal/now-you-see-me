@@ -45,7 +45,7 @@ shot dark "--demo group" scene-group.png --delay 10s
 shot dark "--demo settings" scene-settings.png --attach never --delay 4s
 
 echo "terminal UI"
-cargo run -q --release -p nysm-tui --example screens -- 120 34 --cells --warm 40 > "$out/tui.jsonl"
+cargo run -q --release -p nysm-tui --example screens -- 120 34 --cells --warm 110 > "$out/tui.jsonl"
 
 echo "tray strip"
 for v in names icons; do

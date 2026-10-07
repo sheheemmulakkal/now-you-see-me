@@ -209,7 +209,7 @@ def tui_image(view):
                             dr.ellipse([cx - 2, cy - 2, cx + 2, cy + 2], fill=fgc)
                 elif sym.strip():
                     ff = fb if bold else fr
-                    if sym in "╭╮╰╯↓↑←→●⚠▓░" or ff.getmask(sym).size == (0, 0):
+                    if sym >= "\u2190" or ff.getmask(sym).size == (0, 0):
                         ff = fallback
                     dr.text((px, py + 2), sym, font=ff, fill=fgc)
         return img
