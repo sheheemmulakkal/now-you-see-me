@@ -664,6 +664,71 @@ impl NysmTray {
         }
     }
 
+    /// Menu rows: (label, desktop page). Short, one per resource.
+    fn menu_rows(&self) -> Option<Vec<(String, &'static str)>> {
+        let s = self.snap.as_deref()?;
+        let b = |v: u64| units::bytes(v as f64);
+        let rate = |v: f64| units::rate(v, self.rate);
+        let cores = s.cpu.logical_cores.value.unwrap_or(0);
+        let temp = s
+            .sensors
+            .value
+            .as_ref()
+            .and_then(|v| v.cpu_temperature())
+            .map_or(String::new(), |t| format!(" · {:.0} °C", t.celsius));
+        let mut rows = vec![
+            (
+                s.cpu.usage.live().map_or("CPU  —".into(), |c| {
+                    format!("CPU  {:.0}% of {cores} cores{temp}", c.total_pct)
+                }),
+                "cpu",
+            ),
+            (
+                s.memory.usage.live().map_or("Memory  —".into(), |m| {
+                    format!(
+                        "Memory  {} of {} · {} free",
+                        b(m.used_bytes),
+                        b(m.total_bytes),
+                        b(m.available_bytes)
+                    )
+                }),
+                "memory",
+            ),
+            (
+                s.network.total.live().map_or("Network  —".into(), |n| {
+                    format!(
+                        "Network  ↓ {} · ↑ {}",
+                        rate(n.rx_bytes_per_s),
+                        rate(n.tx_bytes_per_s)
+                    )
+                }),
+                "network",
+            ),
+        ];
+        if let Some(f) = root_fs(s) {
+            rows.push((
+                format!(
+                    "Storage  {} of {} ({:.0}%)",
+                    b(f.used_bytes),
+                    b(f.total_bytes),
+                    f.used_pct
+                ),
+                "storage",
+            ));
+        }
+        if let Some(d) = s.storage.total_io.live() {
+            rows.push((
+                format!(
+                    "Disk  read {} · write {}",
+                    units::rate(d.read_bytes_per_s, RateUnit::Bytes),
+                    units::rate(d.write_bytes_per_s, RateUnit::Bytes)
+                ),
+                "storage",
+            ));
+        }
+        Some(rows)
+    }
+
     /// The menu's value lines: short, so the menu stays narrow.
     fn lines(&self) -> Vec<String> {
         let Some(s) = &self.snap else {
@@ -847,7 +912,25 @@ impl ksni::Tray for NysmTray {
             items.push(info(self.heading()));
             items.push(MenuItem::Separator);
         }
-        items.extend(self.lines().into_iter().map(info));
+        // One row per resource; each opens the monitor on its page.
+        match self.menu_rows() {
+            Some(rows) => {
+                for (label, page) in rows {
+                    items.push(
+                        StandardItem {
+                            label: menu_text(&label),
+                            activate: Box::new(move |_: &mut Self| open_monitor_at(Some(page))),
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                }
+                if self.stale {
+                    items.push(info("Not updating — values are stale".into()));
+                }
+            }
+            None => items.push(info("Collecting…".into())),
+        }
         if !self.firing.is_empty() {
             items.push(MenuItem::Separator);
             for f in &self.firing {
@@ -877,6 +960,11 @@ impl ksni::Tray for NysmTray {
 }
 
 fn open_monitor() {
+    open_monitor_at(None);
+}
+
+/// Start the desktop app, optionally on a page ("cpu", "memory", …).
+fn open_monitor_at(page: Option<&'static str>) {
     // Prefer a nysm-desktop next to this binary, then PATH.
     let sibling = std::env::current_exe()
         .ok()
@@ -884,7 +972,11 @@ fn open_monitor() {
     let cmd = sibling
         .filter(|p| p.exists())
         .map_or_else(|| "nysm-desktop".into(), |p| p.into_os_string());
-    match std::process::Command::new(&cmd).spawn() {
+    let mut command = std::process::Command::new(&cmd);
+    if let Some(p) = page {
+        command.args(["--page", p]);
+    }
+    match command.spawn() {
         // Reap the window when it closes, so it never lingers as a zombie
         // child of the tray.
         Ok(mut child) => {

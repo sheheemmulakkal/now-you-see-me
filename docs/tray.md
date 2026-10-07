@@ -67,9 +67,11 @@ cp packaging/linux/nysm-tray.desktop ~/.config/autostart/
 - **`--no-label`**: icons only (for hosts or users that want no text).
 - **Tooltip**: the same full summary on every item (CPU, memory, network,
   disk, load and pressure, temperatures, firing alerts).
-- **Menu**: CPU (with core count), memory (used/total/available), network
-  ↓/↑, disk read/write, load and pressure (cpu/mem/io), firing alerts,
-  data source, *Open monitor* (also on left click), *Quit*.
+- **Menu**: one row per resource — CPU (cores, temperature), Memory (used,
+  total, free), Network ↓/↑, Storage (used of total), Disk read/write — each
+  opening the monitor on that page; then *Open monitor*, the *Top bar* submenu
+  (what to show, icons/names, compact strip, label legend, data source) and
+  *Quit*. Firing alerts are listed under the rows.
 
 ## Text in the bar
 The values next to the icons use the Ayatana label extension
