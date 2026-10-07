@@ -820,9 +820,23 @@ fn panel_charts(f: &mut Frame, area: Rect, t: &Theme, p: &Panel) {
     };
     match p.charts.as_slice() {
         [(a, sa)] => {
+            // The 100% line gets its own row above the bars, so a high but
+            // not full level (89%) still shows a gap below it.
             label(f, gutter.y, "100%", t.dim());
             label(f, gutter.y + gutter.height.saturating_sub(1), "0%", t.dim());
-            thin_bars(f, area, t, a, p.scale, true, *sa);
+            let line = Rect { height: 1, ..area };
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    (if t.ascii { "." } else { "┈" }).repeat(area.width as usize),
+                    t.border(),
+                )),
+                line,
+            );
+            let bars = below(area, 1);
+            if bars.height >= 4 {
+                label(f, bars.y + bars.height / 2, "50%", t.dim());
+            }
+            thin_bars(f, bars, t, a, p.scale, false, *sa);
         }
         [(a, sa), (b, sb)] => {
             let top = area.height.div_ceil(2);
