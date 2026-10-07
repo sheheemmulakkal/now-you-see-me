@@ -90,6 +90,9 @@ struct CgState {
 #[derive(Default)]
 struct ProcState {
     last_at: Option<Instant>,
+    /// The last scan was the first: rates need a second one, so take it at
+    /// the next tick instead of a full process interval later.
+    quick: bool,
     prev: HashMap<ProcessId, ProcPrev>,
     table: Option<Arc<ProcessTable>>,
 }
@@ -764,10 +767,11 @@ impl Engine {
         now_wall: i64,
         cores: u32,
     ) -> Option<Arc<ProcessTable>> {
-        let due = self
-            .procs
-            .last_at
-            .is_none_or(|t| now.duration_since(t) >= self.cfg.process_interval);
+        let due = self.procs.last_at.is_none_or(|t| {
+            let since = now.duration_since(t);
+            since >= self.cfg.process_interval
+                || (self.procs.quick && since >= self.cfg.process_interval.min(self.cfg.interval))
+        });
         if !due {
             return self.procs.table.clone();
         }
@@ -842,6 +846,7 @@ impl Engine {
         }
         self.procs.prev = prev_map;
         self.procs.last_at = Some(now);
+        self.procs.quick = elapsed.is_none();
         let table = Arc::new(ProcessTable {
             timestamp_ms: now_wall,
             interval_ms: elapsed.map(|e| e.as_millis() as u64),

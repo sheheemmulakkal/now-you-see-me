@@ -460,64 +460,6 @@ fn series(
     }
 }
 
-/// Bar chart of `s` scaled to `scale`, one sample per column, newest at
-/// the right: the classic terminal sparkline (eighth blocks), stacked
-/// over `area.height` rows. Present zeros draw a low baseline; missing
-/// samples stay blank. `line` draws only the top cell of each column, for
-/// levels such as memory that would otherwise fill the box.
-fn chart(f: &mut Frame, area: Rect, t: &Theme, s: &Series, scale: f64, line: bool, style: Style) {
-    let (w, rows) = (area.width as usize, area.height as usize);
-    if w == 0 || rows == 0 {
-        return;
-    }
-    let syms: [&str; 9] = if t.ascii {
-        [" ", "_", "_", "-", "-", "=", "=", "#", "#"]
-    } else {
-        [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
-    };
-    let pad = w.saturating_sub(s.vals.len());
-    let eighths = rows * 8;
-    let levels: Vec<Option<usize>> = (0..w)
-        .map(|col| {
-            let v = col
-                .checked_sub(pad)
-                .and_then(|i| s.vals.get(i).copied().flatten())?;
-            let l = if scale > 0.0 {
-                (v / scale * eighths as f64).round() as usize
-            } else {
-                0
-            };
-            Some(l.clamp(1, eighths))
-        })
-        .collect();
-    let cursor_cell = s.cursor.map(|c| c + pad);
-    let lines: Vec<Line> = (0..rows)
-        .map(|row| {
-            let from_bottom = rows - 1 - row;
-            let cell = |col: usize| match levels[col] {
-                Some(l) if line && l.div_ceil(8) != from_bottom + 1 => " ",
-                Some(l) => syms[l.saturating_sub(from_bottom * 8).min(8)],
-                None => " ",
-            };
-            match cursor_cell {
-                Some(c) if c < w => Line::from(vec![
-                    Span::styled((0..c).map(cell).collect::<String>(), style),
-                    Span::styled(
-                        match cell(c) {
-                            " " => "│",
-                            x => x,
-                        },
-                        style.add_modifier(Modifier::REVERSED),
-                    ),
-                    Span::styled((c + 1..w).map(cell).collect::<String>(), style),
-                ]),
-                _ => Line::from(Span::styled((0..w).map(cell).collect::<String>(), style)),
-            }
-        })
-        .collect();
-    f.render_widget(Paragraph::new(lines), area);
-}
-
 /// A chart inside a titled box.
 #[allow(clippy::too_many_arguments)]
 fn boxed_chart(
@@ -527,13 +469,13 @@ fn boxed_chart(
     title: String,
     s: &Series,
     scale: f64,
-    line: bool,
+    grid: bool,
     style: Style,
 ) {
     let block = t.block("").title(Span::styled(title, t.bold()));
     let inner = block.inner(area);
     f.render_widget(block, area);
-    chart(f, inner, t, s, scale, line, style);
+    thin_bars(f, inner, t, s, scale, grid, style);
 }
 
 /// Samples that fit a box of `area` (borders excluded).
@@ -558,30 +500,16 @@ fn gauge(t: &Theme, pct: Option<f64>, width: usize) -> Line<'static> {
             .round()
             .clamp(0.0, inner as f64) as usize
     });
-    let (l, r, on, off) = if t.ascii {
-        ("[", "]", "#", ".")
-    } else {
-        ("▕", "▏", "█", "░")
-    };
+    let (on, off) = if t.ascii { ("=", "-") } else { ("━", "─") };
     Line::from(vec![
-        Span::styled(l, t.border()),
+        Span::raw(" "),
         Span::styled(
             on.repeat(filled),
-            pct.map_or(t.dim(), |p| level_style(t, p)),
+            pct.map_or(t.dim(), |p| level_style(t, p).add_modifier(Modifier::BOLD)),
         ),
         Span::styled(off.repeat(inner - filled), t.border()),
-        Span::styled(r, t.border()),
+        Span::raw(" "),
     ])
-}
-
-/// One row of the System box.
-struct Meter {
-    label: &'static str,
-    label_style: Style,
-    /// `Some(pct)` draws a bar; `None` lets the text use its column.
-    bar: Option<Option<f64>>,
-    text: Vec<Span<'static>>,
-    trend: Option<(Series, f64, Style)>,
 }
 
 fn history_span(h: &[HistoryPoint], width: usize) -> String {
@@ -598,189 +526,177 @@ fn opt_rate(v: Option<f32>, unit: RateUnit) -> String {
     v.map_or("—".into(), |v| units::rate(v as f64, unit))
 }
 
-fn pct_text(t: &Theme, pct: Option<f64>) -> Span<'static> {
-    match pct {
-        Some(p) => Span::styled(
-            format!("{p:>5.1}%"),
-            level_style(t, p).add_modifier(Modifier::BOLD),
-        ),
-        None => Span::styled("    — ", t.dim()),
-    }
+fn draw_overview(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Theme) {
+    overview_boxes(f, area, app, s, t);
 }
 
-fn draw_overview(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Theme) {
-    let h = app.history().to_vec();
+/// Thin vertical bars, one sample per column (`┃` full cell, `╻` half),
+/// newest at the right. Zero draws nothing; a missing sample a dim dot on
+/// the baseline, so the two never look alike.
+/// `grid` draws a dotted line at the top of the scale (100%) where no bar
+/// reaches, so a level reads against its ceiling.
+fn thin_bars(
+    f: &mut Frame,
+    area: Rect,
+    t: &Theme,
+    s: &Series,
+    scale: f64,
+    grid: bool,
+    style: Style,
+) {
+    let (w, rows) = (area.width as usize, area.height as usize);
+    if w == 0 || rows == 0 {
+        return;
+    }
+    let (full, half, none) = if t.ascii {
+        ("|", ".", ".")
+    } else {
+        ("┃", "╻", "·")
+    };
+    let pad = w.saturating_sub(s.vals.len());
+    let halves = rows * 2;
+    let cursor_cell = s.cursor.map(|c| c + pad);
+    let lines: Vec<Line> = (0..rows)
+        .map(|row| {
+            let from_bottom = rows - 1 - row;
+            let spans: Vec<Span> = (0..w)
+                .map(|col| {
+                    let v = col
+                        .checked_sub(pad)
+                        .and_then(|i| s.vals.get(i).copied())
+                        .flatten();
+                    let in_range = col >= pad;
+                    let gridline = if grid && row == 0 {
+                        (if t.ascii { "." } else { "┈" }, t.border())
+                    } else {
+                        (" ", style)
+                    };
+                    let (sym, st) = match v {
+                        Some(v) => {
+                            let l = if scale > 0.0 {
+                                ((v / scale) * halves as f64).round() as usize
+                            } else {
+                                0
+                            };
+                            let l = if v > 0.0 { l.clamp(1, halves) } else { 0 };
+                            match l.saturating_sub(from_bottom * 2).min(2) {
+                                2 => (full, style),
+                                1 => (half, style),
+                                _ => gridline,
+                            }
+                        }
+                        None if in_range && from_bottom == 0 => (none, t.border()),
+                        None => gridline,
+                    };
+                    if Some(col) == cursor_cell {
+                        (
+                            if sym == " " { "│" } else { sym },
+                            st.add_modifier(Modifier::REVERSED),
+                        )
+                    } else {
+                        (sym, st)
+                    }
+                })
+                .map(|(sym, st)| Span::styled(sym, st))
+                .collect();
+            Line::from(spans)
+        })
+        .collect();
+    f.render_widget(Paragraph::new(lines), area);
+}
+
+/// One resource for the panel layouts.
+struct Panel {
+    title: &'static str,
+    style: Style,
+    value: Vec<Span<'static>>,
+    detail: Vec<Span<'static>>,
+    /// Fill level for a gauge, when the resource has one.
+    pct: Option<Option<f64>>,
+    /// One chart, or two (download/upload, read/write) on one scale.
+    charts: Vec<(Series, Style)>,
+    scale: f64,
+}
+
+fn panels(app: &App, s: &Snapshot, t: &Theme, h: &[HistoryPoint], n: usize) -> Vec<Panel> {
     let cursor = app.cursor;
     let point = app.cursor_point().copied();
-
-    // Columns inside the System box: label, bar, text, trend.
-    let inner_w = area.width.saturating_sub(2);
-    let label_w = 10u16;
-    let bar_w: u16 = if inner_w >= 110 {
-        32
-    } else if inner_w >= 80 {
-        22
-    } else {
-        14
-    };
-    let trend_w: u16 = if inner_w >= 150 {
-        (inner_w - label_w - bar_w) / 3
-    } else if inner_w >= 80 {
-        (inner_w - label_w - bar_w) / 5
-    } else {
-        0
-    };
-    let text_w = inner_w.saturating_sub(label_w + bar_w + trend_w + 2);
-    let n = trend_w as usize;
     let b = |v: u64| units::bytes(v as f64);
+    let mut out = Vec::new();
 
-    let mut meters: Vec<Meter> = Vec::new();
-
-    // CPU
     let cpu = match &point {
         Some(p) => p.cpu_pct.map(f64::from),
         None => s.cpu.usage.live().map(|c| c.total_pct),
     };
-    let mut text = vec![pct_text(t, cpu)];
-    match (&point, s.cpu.usage.live()) {
-        (None, Some(c)) => text.push(Span::styled(
-            format!(
-                "  user {:.0} · system {:.0} · iowait {:.0} · load {}",
-                c.user_pct + c.nice_pct,
-                c.system_pct,
-                c.iowait_pct,
-                s.cpu
-                    .load
-                    .live()
-                    .map_or("—".into(), |l| format!("{:.2}", l.one)),
-            ),
-            t.dim(),
-        )),
-        (None, None) => text.push(Span::styled(
-            format!("  {}", missing(&s.cpu.usage)),
-            t.dim(),
-        )),
-        _ => {}
-    }
-    meters.push(Meter {
-        label: "CPU",
-        label_style: t.cpu(),
-        bar: Some(cpu),
-        text,
-        trend: Some((series(&h, n, cursor, |p| p.cpu_pct), 100.0, t.cpu())),
+    let cores = s.cpu.logical_cores.value.unwrap_or(0);
+    let detail = match (&point, s.cpu.usage.live()) {
+        (None, Some(c)) => format!(
+            "user {:.0}% · system {:.0}% · iowait {:.0}% · load {} on {cores} cores",
+            c.user_pct + c.nice_pct,
+            c.system_pct,
+            c.iowait_pct,
+            s.cpu
+                .load
+                .live()
+                .map_or("—".into(), |l| format!("{:.2}", l.one)),
+        ),
+        (None, None) => missing(&s.cpu.usage),
+        _ => String::new(),
+    };
+    out.push(Panel {
+        title: "CPU",
+        style: t.cpu(),
+        value: vec![Span::styled(
+            cpu.map_or("—".into(), |c| format!("{c:.1}%")),
+            t.cpu().add_modifier(Modifier::BOLD),
+        )],
+        detail: vec![Span::styled(detail, t.dim())],
+        pct: Some(cpu),
+        charts: vec![(series(h, n, cursor, |p| p.cpu_pct), t.cpu())],
+        scale: 100.0,
     });
 
-    // Per-core mini bars, live only (history keeps the total).
-    let cores: Vec<Span<'static>> = if point.is_none() && s.cpu.per_core.len() <= 32 {
-        s.cpu
-            .per_core
-            .iter()
-            .flat_map(|c| {
-                let p = c.usage_pct.live().copied();
-                let mut v = vec![Span::styled(format!("{} ", c.id), t.dim())];
-                v.extend(gauge(t, p, 7).spans);
-                v.push(Span::styled(
-                    p.map_or("  — ".into(), |p| format!("{p:>3.0}%")),
-                    t.dim(),
-                ));
-                v.push(Span::raw("  "));
-                v
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-    if !cores.is_empty() {
-        meters.push(Meter {
-            label: "Cores",
-            label_style: t.cpu(),
-            bar: None,
-            text: cores,
-            trend: None,
-        });
-    }
-
-    // Memory
     let live_mem = s.memory.usage.live();
     let mem = match &point {
         Some(p) => p.mem_used_pct.map(f64::from),
         None => live_mem.map(|m| m.used_pct),
     };
-    let mut text = vec![pct_text(t, mem)];
-    match (&point, live_mem) {
-        (None, Some(m)) => text.push(Span::styled(
+    let (value, detail) = match (&point, live_mem) {
+        (None, Some(m)) => (
             format!(
-                "  {} of {} used · {} available",
+                "{} / {}  ({:.0}%)",
                 b(m.used_bytes),
                 b(m.total_bytes),
-                b(m.available_bytes)
+                m.used_pct
             ),
-            t.dim(),
-        )),
-        (None, None) => text.push(Span::styled(
-            format!("  {}", missing(&s.memory.usage)),
-            t.dim(),
-        )),
-        _ => {}
-    }
-    meters.push(Meter {
-        label: "Memory",
-        label_style: t.mem(),
-        bar: Some(mem),
-        text,
-        trend: Some((series(&h, n, cursor, |p| p.mem_used_pct), 100.0, t.mem())),
+            format!(
+                "{} available{}",
+                b(m.available_bytes),
+                s.memory.swap.live().map_or(String::new(), |w| {
+                    if w.total_bytes == 0 {
+                        " · no swap".into()
+                    } else {
+                        format!(" · swap {} / {}", b(w.used_bytes), b(w.total_bytes))
+                    }
+                })
+            ),
+        ),
+        (None, None) => ("—".into(), missing(&s.memory.usage)),
+        (Some(_), _) => (
+            mem.map_or("—".into(), |m| format!("{m:.1}% used")),
+            String::new(),
+        ),
+    };
+    out.push(Panel {
+        title: "Memory",
+        style: t.mem(),
+        value: vec![Span::styled(value, t.mem().add_modifier(Modifier::BOLD))],
+        detail: vec![Span::styled(detail, t.dim())],
+        pct: Some(mem),
+        charts: vec![(series(h, n, cursor, |p| p.mem_used_pct), t.mem())],
+        scale: 100.0,
     });
 
-    // Swap and storage have no history; shown live only.
-    if point.is_none() {
-        match s.memory.swap.live() {
-            Some(w) if w.total_bytes > 0 => {
-                let pct = w.used_bytes as f64 / w.total_bytes as f64 * 100.0;
-                meters.push(Meter {
-                    label: "Swap",
-                    label_style: t.mem(),
-                    bar: Some(Some(pct)),
-                    text: vec![
-                        pct_text(t, Some(pct)),
-                        Span::styled(
-                            format!("  {} of {}", b(w.used_bytes), b(w.total_bytes)),
-                            t.dim(),
-                        ),
-                    ],
-                    trend: None,
-                });
-            }
-            _ => {}
-        }
-        if let Some(fs) = s
-            .storage
-            .filesystems
-            .value
-            .as_ref()
-            .and_then(|v| v.iter().find(|fs| fs.mount_point == "/"))
-        {
-            meters.push(Meter {
-                label: "Storage",
-                label_style: t.disk(),
-                bar: Some(Some(fs.used_pct)),
-                text: vec![
-                    pct_text(t, Some(fs.used_pct)),
-                    Span::styled(
-                        format!(
-                            "  {} of {} used on / · {} free",
-                            b(fs.used_bytes),
-                            b(fs.total_bytes),
-                            b(fs.available_bytes)
-                        ),
-                        t.dim(),
-                    ),
-                ],
-                trend: None,
-            });
-        }
-    }
-
-    // Network: download / upload now, total throughput trend.
     let (rx, tx) = match &point {
         Some(p) => (p.net_rx_bytes_per_s, p.net_tx_bytes_per_s),
         None => {
@@ -791,37 +707,44 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
             )
         }
     };
+    let rs = series(h, n, cursor, |p| p.net_rx_bytes_per_s);
+    let ts = series(h, n, cursor, |p| p.net_tx_bytes_per_s);
+    let peak = rs.max.max(ts.max).max(1.0);
     let (dn, upa) = if t.ascii {
         ("down ", "up ")
     } else {
         ("↓ ", "↑ ")
     };
-    let mut text = vec![
-        Span::styled(
-            format!("{dn}{:<12}", opt_rate(rx, app.rate)),
-            t.net().add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("{upa}{:<12}", opt_rate(tx, app.rate)),
-            t.up().add_modifier(Modifier::BOLD),
-        ),
-    ];
-    if point.is_none() && !s.network.total.is_available() {
-        text.push(Span::styled(missing(&s.network.total), t.dim()));
-    }
-    let ns = series(&h, n, cursor, |p| {
-        Some(p.net_rx_bytes_per_s? + p.net_tx_bytes_per_s?)
-    });
-    let peak = ns.max.max(1.0);
-    meters.push(Meter {
-        label: "Network",
-        label_style: t.net(),
-        bar: None,
-        text,
-        trend: Some((ns, peak, t.net())),
+    out.push(Panel {
+        title: "Network",
+        style: t.net(),
+        value: vec![
+            Span::styled(
+                format!("{dn}{}", opt_rate(rx, app.rate)),
+                t.net().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("   "),
+            Span::styled(
+                format!("{upa}{}", opt_rate(tx, app.rate)),
+                t.up().add_modifier(Modifier::BOLD),
+            ),
+        ],
+        detail: vec![Span::styled(
+            if point.is_none() && !s.network.total.is_available() {
+                missing(&s.network.total)
+            } else {
+                format!(
+                    "download / upload · chart peak {}",
+                    units::rate(peak, app.rate)
+                )
+            },
+            t.dim(),
+        )],
+        pct: None,
+        charts: vec![(rs, t.net()), (ts, t.up())],
+        scale: peak,
     });
 
-    // Disk I/O
     let (rd, wr) = match &point {
         Some(p) => (p.disk_read_bytes_per_s, p.disk_write_bytes_per_s),
         None => {
@@ -832,46 +755,184 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
             )
         }
     };
-    let mut text = vec![
-        Span::styled(
-            format!("read {:<12}", opt_rate(rd, RateUnit::Bytes)),
-            t.disk().add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("write {:<12}", opt_rate(wr, RateUnit::Bytes)),
-            t.write().add_modifier(Modifier::BOLD),
-        ),
-    ];
+    let rs = series(h, n, cursor, |p| p.disk_read_bytes_per_s);
+    let ws = series(h, n, cursor, |p| p.disk_write_bytes_per_s);
+    let peak = rs.max.max(ws.max).max(1.0);
+    let root = s
+        .storage
+        .filesystems
+        .value
+        .as_ref()
+        .and_then(|v| v.iter().find(|fs| fs.mount_point == "/"));
+    let mut detail = Vec::new();
     if point.is_none() {
-        if let Some(busy) = s.storage.total_io.live().and_then(|d| d.busy_pct) {
-            text.push(Span::styled(format!("busy {busy:.0}% · "), t.dim()));
+        if let Some(fs) = root {
+            detail.push(format!(
+                "/ {:.0}% full ({} free)",
+                fs.used_pct,
+                b(fs.available_bytes)
+            ));
         }
-        text.push(Span::styled(
-            format!("psi {}", pressure_short(&s.storage.io_pressure)),
-            t.dim(),
-        ));
+        if let Some(busy) = s.storage.total_io.live().and_then(|d| d.busy_pct) {
+            detail.push(format!("busy {busy:.0}%"));
+        }
     }
-    let ds = series(&h, n, cursor, |p| {
-        Some(p.disk_read_bytes_per_s? + p.disk_write_bytes_per_s?)
+    detail.push(format!("chart peak {}", units::rate(peak, RateUnit::Bytes)));
+    out.push(Panel {
+        title: "Disk",
+        style: t.disk(),
+        value: vec![
+            Span::styled(
+                format!("read {}", opt_rate(rd, RateUnit::Bytes)),
+                t.disk().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("   "),
+            Span::styled(
+                format!("write {}", opt_rate(wr, RateUnit::Bytes)),
+                t.write().add_modifier(Modifier::BOLD),
+            ),
+        ],
+        detail: vec![Span::styled(detail.join(" · "), t.dim())],
+        pct: None,
+        charts: vec![(rs, t.disk()), (ws, t.write())],
+        scale: peak,
     });
-    let peak_d = ds.max.max(1.0);
-    meters.push(Meter {
-        label: "Disk I/O",
-        label_style: t.disk(),
-        bar: None,
-        text,
-        trend: Some((ds, peak_d, t.disk())),
-    });
+    out
+}
 
-    let box_h = meters.len() as u16 + 2;
-    let [head_area, sys_area, procs_area] = Layout::vertical([
+/// Charts of a panel stacked in `area` (two charts split it).
+fn panel_charts(f: &mut Frame, area: Rect, t: &Theme, p: &Panel) {
+    // A gutter on the left labels the scale or the series.
+    let gw = 5u16.min(area.width);
+    let [gutter, area] =
+        Layout::horizontal([Constraint::Length(gw), Constraint::Min(0)]).areas(area);
+    let label = |f: &mut Frame, y: u16, text: &str, st: Style| {
+        if y < gutter.y + gutter.height {
+            f.render_widget(
+                Paragraph::new(Span::styled(format!("{text:>4}"), st)),
+                Rect {
+                    y,
+                    height: 1,
+                    ..gutter
+                },
+            );
+        }
+    };
+    match p.charts.as_slice() {
+        [(a, sa)] => {
+            label(f, gutter.y, "100%", t.dim());
+            label(f, gutter.y + gutter.height.saturating_sub(1), "0%", t.dim());
+            thin_bars(f, area, t, a, p.scale, true, *sa);
+        }
+        [(a, sa), (b, sb)] => {
+            let top = area.height.div_ceil(2);
+            let [x, y] =
+                Layout::vertical([Constraint::Length(top), Constraint::Min(0)]).areas(area);
+            let names = if p.title == "Network" {
+                if t.ascii {
+                    ["down", "up"]
+                } else {
+                    ["↓", "↑"]
+                }
+            } else {
+                ["R", "W"]
+            };
+            label(f, x.y + x.height.saturating_sub(1), names[0], *sa);
+            label(f, y.y + y.height.saturating_sub(1), names[1], *sb);
+            thin_bars(f, x, t, a, p.scale, false, *sa);
+            thin_bars(f, y, t, b, p.scale, false, *sb);
+        }
+        _ => {}
+    }
+}
+
+/// A bordered box per resource, two per row, then the process table.
+fn overview_boxes(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Theme) {
+    let h = app.history().to_vec();
+    let two = area.width >= 80;
+    let box_w = if two { area.width / 2 } else { area.width };
+    let n = box_w.saturating_sub(2 + 5) as usize; // borders, scale gutter
+    let ps = panels(app, s, t, &h, n);
+    // Taller boxes on tall terminals give the charts finer steps.
+    // Boxes shrink on short terminals so the process table keeps ~8 rows.
+    let rows = if two { 2 } else { 4 };
+    let want = if area.height >= 44 { 11u16 } else { 9 };
+    let box_h = want.min(area.height.saturating_sub(1 + 8) / rows).max(5);
+    let [head, grid, procs] = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(box_h),
+        Constraint::Length(box_h * rows),
         Constraint::Min(0),
     ])
     .areas(area);
+    f.render_widget(Paragraph::new(overview_head(app, s, t, &h, n)), head);
+    for (i, p) in ps.iter().enumerate() {
+        let (cx, cy) = if two { (i % 2, i / 2) } else { (0, i) };
+        let r = Rect {
+            x: grid.x + cx as u16 * box_w,
+            y: grid.y + cy as u16 * box_h,
+            width: if two && cx == 1 {
+                grid.width - box_w
+            } else {
+                box_w
+            },
+            height: box_h,
+        };
+        let inner = card(f, r, t, p.title, p.style);
+        let mut lines = vec![Line::from(p.value.clone()), Line::from(p.detail.clone())];
+        // The gauge repeats the chart's latest level: drop it when space is short.
+        if let Some(pct) = p.pct
+            && inner.height >= 7
+        {
+            lines.push(gauge(t, pct, inner.width as usize));
+        }
+        let text_h = lines.len() as u16;
+        f.render_widget(
+            Paragraph::new(lines),
+            Rect {
+                height: text_h,
+                ..inner
+            },
+        );
+        panel_charts(f, below(inner, text_h), t, p);
+    }
+    if procs.height >= 5 {
+        process_table(f, procs, app, s, t, false);
+    }
+}
 
-    // Timeline / status line.
+/// A titled card with rounded borders; returns its inner area.
+fn card(f: &mut Frame, area: Rect, t: &Theme, title: &str, style: Style) -> Rect {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_set(t.borders())
+        .border_style(t.border())
+        .title(Span::styled(
+            format!(" {title} "),
+            style.add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    inner
+}
+
+/// The area under the first `skip` lines.
+fn below(area: Rect, skip: u16) -> Rect {
+    let skip = skip.min(area.height);
+    Rect {
+        y: area.y + skip,
+        height: area.height - skip,
+        ..area
+    }
+}
+
+/// Status line above the overview: timeline cursor, alerts or the clock.
+fn overview_head(
+    app: &App,
+    s: &Snapshot,
+    t: &Theme,
+    h: &[HistoryPoint],
+    n: usize,
+) -> Line<'static> {
     let interval_ms = s.interval_ms.unwrap_or(1000) as i64;
     let event_at = |ts: i64| {
         app.alert_events
@@ -879,7 +940,7 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
             .rev()
             .find(|e| e.timestamp_ms > ts - interval_ms && e.timestamp_ms <= ts + interval_ms / 2)
     };
-    let head = match &point {
+    match app.cursor_point() {
         Some(p) => {
             let mut spans = vec![Span::styled(
                 format!(
@@ -913,72 +974,17 @@ fn draw_overview(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
                     safe(&e.rule)
                 )
             });
+            let span = history_span(h, n);
+            let span = if span.is_empty() {
+                String::new()
+            } else {
+                format!(" · charts: {span}")
+            };
             Line::from(Span::styled(
-                format!("now {}{last}", clock(s.timestamp_ms)),
+                format!("now {}{span}{last}", clock(s.timestamp_ms)),
                 t.dim(),
             ))
         }),
-    };
-    f.render_widget(Paragraph::new(head), head_area);
-
-    let span = history_span(&h, n);
-    let title = if trend_w > 0 && !span.is_empty() {
-        format!(" System · bars show now · trend on the right: {span} ")
-    } else {
-        " System ".to_string()
-    };
-    let block = t.block("").title(Span::styled(title, t.bold()));
-    let inner = block.inner(sys_area);
-    f.render_widget(block, sys_area);
-    for (i, m) in meters.into_iter().enumerate() {
-        let row = Rect {
-            y: inner.y + i as u16,
-            height: 1,
-            ..inner
-        };
-        if row.y >= inner.y + inner.height {
-            break;
-        }
-        let [l, bar, text, gap, trend] = Layout::horizontal([
-            Constraint::Length(label_w),
-            Constraint::Length(bar_w),
-            Constraint::Length(text_w),
-            Constraint::Length(2),
-            Constraint::Length(trend_w),
-        ])
-        .areas(row);
-        let _ = gap;
-        f.render_widget(
-            Paragraph::new(Span::styled(
-                m.label,
-                m.label_style.add_modifier(Modifier::BOLD),
-            )),
-            l,
-        );
-        let text_area = match m.bar {
-            Some(p) => {
-                f.render_widget(Paragraph::new(gauge(t, p, bar_w as usize - 1)), bar);
-                text
-            }
-            None if m.trend.is_none() => Rect {
-                width: bar.width + text.width + 2 + trend.width,
-                ..bar
-            },
-            None => Rect {
-                width: bar.width + text.width,
-                ..bar
-            },
-        };
-        f.render_widget(Paragraph::new(Line::from(m.text)), text_area);
-        if let Some((sr, scale, style)) = m.trend
-            && trend_w > 0
-        {
-            chart(f, trend, t, &sr, scale, false, style);
-        }
-    }
-
-    if procs_area.height >= 5 {
-        process_table(f, procs_area, app, s, t, false);
     }
 }
 
@@ -1088,8 +1094,19 @@ fn process_table(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
         .map(|(ri, (i, depth))| {
             let p = &table.entries[*i];
             let cpu_v = p.cpu_pct.live().copied();
-            let cpu = Cell::from(align(cpu_v.map_or("—".into(), |c| format!("{c:.1}")), true))
-                .style(cpu_v.map_or(t.dim(), |c| t.heat(c)));
+            // "…" while the first rate is measured, "—" when unavailable.
+            let pending = |st: Status| {
+                if st == Status::WarmingUp {
+                    "…"
+                } else {
+                    "—"
+                }
+            };
+            let cpu = Cell::from(align(
+                cpu_v.map_or(pending(p.cpu_pct.status).into(), |c| format!("{c:.1}")),
+                true,
+            ))
+            .style(cpu_v.map_or(t.dim(), |c| t.heat(c)));
             let mem_v = total_mem.map(|tm| p.rss_bytes as f64 / tm * 100.0);
             let mem = Cell::from(align(mem_v.map_or("—".into(), |m| format!("{m:.1}")), true))
                 .style(mem_v.map_or(t.dim(), |m| t.heat(m)));
@@ -1113,7 +1130,7 @@ fn process_table(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &The
                 (None, Status::PermissionDenied) => {
                     Cell::from(align("denied".into(), true)).style(t.dim())
                 }
-                (None, _) => Cell::from(align("—".into(), true)).style(t.dim()),
+                (None, st) => Cell::from(align(pending(st).into(), true)).style(t.dim()),
             };
             let d = p.disk_io.live();
             let (r, w) = (
@@ -1309,7 +1326,7 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App, s: &Snapshot, t: &Theme) {
             format!(" pinned CPU % of machine, 0-100 (max {cpu_max:.1}){exited} "),
             &cpu,
             100.0,
-            false,
+            true,
             t.cpu(),
         );
         boxed_chart(
@@ -1319,7 +1336,7 @@ fn draw_details(f: &mut Frame, area: Rect, app: &App, s: &Snapshot, t: &Theme) {
             format!(" pinned RSS (max {}) ", units::bytes(rss_max as f64)),
             &rss,
             rss_max as f64,
-            true,
+            false,
             t.mem(),
         );
     }
@@ -1445,7 +1462,7 @@ fn draw_cpu(f: &mut Frame, area: Rect, app: &mut App, s: &Snapshot, t: &Theme) {
         " CPU total, 0-100% ".into(),
         &cs,
         100.0,
-        false,
+        true,
         t.cpu(),
     );
 }

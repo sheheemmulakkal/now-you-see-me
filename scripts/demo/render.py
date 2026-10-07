@@ -173,6 +173,11 @@ def tui_image(view):
             return xterm(int(name[8:-1]))
         return pal.get(name, default)
     bgc = (16, 19, 32)
+    if os.environ.get("NYSM_PREVIEW_PALETTE") == "solarized":  # match a Solarized terminal
+        pal.update({"Reset": (200, 205, 205), "Cyan": (42, 161, 152), "Green": (133, 153, 0),
+                    "Yellow": (181, 137, 0), "Magenta": (211, 54, 130), "Red": (220, 50, 47),
+                    "Blue": (38, 139, 210), "LightRed": (203, 75, 22), "Black": (7, 54, 66)})
+        bgc = (0, 5, 11)
     host = os.uname().nodename
     for l in open(os.path.join(CAP, "tui.jsonl")):
         d = json.loads(l)
