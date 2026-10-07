@@ -282,13 +282,12 @@ monochrome.
 ### Tray (`nysm-tray`)
 Icons with live values in the top bar: CPU `24%`, memory `6.2G`, network
 `↓1.8M ↑240K`, storage used `87%` (how full `/` is) and disk activity `12%`. Choose what is shown from its menu
-(*Show in top bar*, including disk read/write); the choice is saved. `--meter`
-gives one compact two-bar icon; `--no-label` icons only. Hovering any item
-shows the full summary. A `⚠` appears while an alert fires. Text in the bar needs
+(*Top bar* submenu: items including disk read/write, icons/names, compact
+strip); the choice is saved. `--meter` gives one compact two-bar icon;
+`--no-label` icons only. The menu itself is short: *Open monitor*, *Top bar*,
+*Quit*, plus a line when values stop updating or an alert fires. A `⚠` appears while an alert fires. Text in the bar needs
 Ubuntu's AppIndicator host; other desktops show the icons.
-Hover for exact values; open its menu for CPU, memory, network, disk,
-pressure and temperature lines, firing alerts, the data source and "Open
-monitor" (starts the desktop app). Works on Ubuntu GNOME (built-in AppIndicator support), KDE,
+Click it for *Open monitor*, the *Top bar* settings and *Quit*. Works on Ubuntu GNOME (built-in AppIndicator support), KDE,
 XFCE and other StatusNotifier desktops ([tray.md](tray.md)).
 
 ### Desktop app (`nysm-desktop`)

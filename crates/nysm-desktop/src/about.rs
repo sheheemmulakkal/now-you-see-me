@@ -186,8 +186,8 @@ pub fn build(page: &gtk::Box, history: Duration, interval: Duration) -> About {
             "Top-bar labels",
             "<b>CPU</b> usage of all cores · <b>RAM</b> memory in use · <b>↓ ↑</b> network \
              download / upload · <b>Disk</b> storage used on <tt>/</tt> · <b>I/O</b> how busy \
-             the disk is · <b>R / W</b> disk read / write per second. Click the top bar for \
-             details and its Top bar menu.",
+             the disk is · <b>R / W</b> disk read / write per second. Click the top bar to \
+             open this window or choose what it shows (Top bar menu).",
         ),
         info_card(
             "security-high-symbolic",

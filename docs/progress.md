@@ -2,6 +2,34 @@
 
 Read this first when resuming. Newest entry on top.
 
+## 2026-10-07 — memory by app, real memory, tray polish, demo video (in progress)
+
+Done (all committed and pushed):
+- Processes page: MEM % column; **Group by app** (one row per program with
+  summed CPU/MEM %/disk); selecting a group shows its largest processes and
+  its real memory (PSS sum, computed once in the background) and private part
+  (USS). Chrome measured 4.8 GiB RSS sum vs 1.8 GiB PSS. Single processes and
+  `nysm inspect` show PSS/USS (`smaps_rollup`, new `ProcessDetails.memory`).
+- Tray: compact strip image on GNOME (fixed width, no jumping), names/icons
+  options, item choice in the menu and in desktop Settings; the menu is now
+  only *Open monitor · Top bar ▸ · Quit* (+ stale/alert lines).
+- History: kept length fixed (was ~60 % of configured), custom minutes with
+  cost explanation, ranges up to 24 h; About page with live cost; cleanup
+  (tray signals, exited pins, stale temps, uninstall --purge); tray zombie fix.
+- Desktop capture aids for demo videos: `--demo watch|group|settings` with
+  `--screenshot` (also captures dialogs).
+
+Next:
+- **Demo video for sheheem.in** (first render was lost when /tmp was wiped
+  on reboot). Recreate the renderer as `scripts/demo/render.py` and a
+  `scripts/demo/capture.sh` (pages via `--screenshot`, `--demo …` scenes on a
+  headless broadway display with `GTK_THEME=Yaru-dark`, TUI via
+  `cargo run -p nysm-tui --example screens -- 120 34 --cells --warm 40`, tray
+  strip via a private `dbus-run-session` tray, CLI output with the hostname
+  replaced). Output to `~/Videos/now-you-see-me/` (MP4, WebM, GIF, poster).
+  Waiting on the owner's logo for the intro/outro.
+- Optional: real-memory (PSS) column refreshed every ~15 s in the background.
+
 ## 2026-10-06 — on-demand diagnostics and storage growth
 
 - `nysm net check HOST[:PORT]` (DNS + TCP connect latency, no ICMP) and
