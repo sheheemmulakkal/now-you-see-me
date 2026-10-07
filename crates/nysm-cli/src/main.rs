@@ -40,7 +40,7 @@ Examples:
   nysm services --sort mem         systemd services by memory
   nysm record -o before.nysm -- cargo build --release
   nysm compare before.nysm after.nysm
-    nysm tui                         interactive terminal UI
+  nysm tui                         interactive terminal UI
   nysm service run &               optional shared collector (TUI/desktop attach to it)
   nysm alerts                      watch sustained alert rules (see `nysm config show`)
   nysm capabilities --json         what this machine can report, and why not

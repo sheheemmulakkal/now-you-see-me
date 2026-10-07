@@ -346,36 +346,48 @@ def main():
 
     summ = open(os.path.join(CAP, "cli-summary.txt")).read().splitlines()[:13]
     net = open(os.path.join(CAP, "cli-net.txt")).read().splitlines()
-    sessions = [("nysm summary", summ), ("nysm net check github.com", net)]
+    helps = open(os.path.join(CAP, "cli-help.txt")).read().splitlines()
 
-    def cli(frame, t, dur):
-        cap = caption("Scriptable CLI", "One-shot answers, JSON for scripts,\nrecordings and comparisons.", "Command line")
-        place(frame, cap, 120, H / 2 - cap.height / 2 - 40, ease_out(ramp(t, 0, 0.8)))
-        term = Image.new("RGBA", (1060, 760), (16, 19, 32, 255))
-        d = ImageDraw.Draw(term)
-        f, fb = font(19, "Regular", True), font(19, "Bold", True)
-        y, clock = 18, 0.6
-        for cmd, out in sessions:
-            if t < clock:
-                break
-            typed = int(clamp((t - clock) / 0.045, 0, len(cmd)))
-            d.text((20, y), "$ ", font=fb, fill=TEAL)
-            d.text((44, y), cmd[:typed] + ("▍" if typed < len(cmd) else ""), font=fb, fill=FG)
-            y += 30
-            clock += len(cmd) * 0.045 + 0.25
-            for line in out[:int(clamp((t - clock) / 0.06, 0, len(out)))]:
-                d.text((20, y), line[:96], font=f, fill=(200, 205, 220))
-                y += 26
-            clock += len(out) * 0.06 + 0.6
-            y += 14
-        term = terminal_frame(term, "bash")
-        k = ease_out(ramp(t, 0.2, 1.0))
-        sh = Image.new("RGBA", (term.width + 120, term.height + 120), (0, 0, 0, 0))
-        ImageDraw.Draw(sh).rounded_rectangle([60, 74, 60 + term.width, 74 + term.height], 16, fill=(0, 0, 0, 140))
-        tx, ty = W - term.width - 70, H / 2 - term.height / 2 + 60 * (1 - k)
-        place(frame, sh.filter(ImageFilter.GaussianBlur(26)), tx - 60, ty - 60, k)
-        place(frame, rounded(term, 14), tx, ty, k)
+    def terminal_scene(title, sub, chip, sessions, line_dt=0.06):
+        def draw(frame, t, dur):
+            cap = caption(title, sub, chip)
+            place(frame, cap, 120, H / 2 - cap.height / 2 - 40, ease_out(ramp(t, 0, 0.8)))
+            term = Image.new("RGBA", (1060, 760), (16, 19, 32, 255))
+            d = ImageDraw.Draw(term)
+            f, fb = font(19, "Regular", True), font(19, "Bold", True)
+            y, clock = 18, 0.6
+            for cmd, out in sessions:
+                if t < clock:
+                    break
+                typed = int(clamp((t - clock) / 0.045, 0, len(cmd)))
+                d.text((20, y), "$ ", font=fb, fill=TEAL)
+                d.text((44, y), cmd[:typed] + ("▍" if typed < len(cmd) else ""), font=fb, fill=FG)
+                y += 30
+                clock += len(cmd) * 0.045 + 0.25
+                for line in out[:int(clamp((t - clock) / line_dt, 0, len(out)))]:
+                    # Command names stand out, as in a real terminal.
+                    if line.startswith("  ") and not line.startswith("   ") and cmd.endswith("--help"):
+                        name, rest = line[2:16], line[16:]
+                        d.text((20, y), "  " + name, font=fb, fill=TEAL)
+                        d.text((20 + f.getlength("  " + name), y), rest[:80], font=f, fill=(200, 205, 220))
+                    else:
+                        d.text((20, y), line[:96], font=fb if line.endswith(":") else f, fill=(200, 205, 220))
+                    y += 26
+                clock += len(out) * line_dt + 0.6
+                y += 14
+            term = terminal_frame(term, "bash")
+            k = ease_out(ramp(t, 0.2, 1.0))
+            sh = Image.new("RGBA", (term.width + 120, term.height + 120), (0, 0, 0, 0))
+            ImageDraw.Draw(sh).rounded_rectangle([60, 74, 60 + term.width, 74 + term.height], 16, fill=(0, 0, 0, 140))
+            tx, ty = W - term.width - 70, H / 2 - term.height / 2 + 60 * (1 - k)
+            place(frame, sh.filter(ImageFilter.GaussianBlur(26)), tx - 60, ty - 60, k)
+            place(frame, rounded(term, 14), tx, ty, k)
+        return draw
 
+    SCENES.append((6.5, terminal_scene("Every command,\none --help away", "nysm --help lists them all;\nnysm help <command> for details.",
+                                       "Command line", [("nysm --help", helps)], line_dt=0.07)))
+    cli = terminal_scene("Scriptable CLI", "One-shot answers, JSON for scripts,\nrecordings and comparisons.", "Command line",
+                         [("nysm summary", summ), ("nysm net check github.com", net)])
     SCENES.append((8.5, cli))
     SCENES.append((4.8, window_scene(pg["about"], "Tiny footprint,\nmeasured live",
                                      "The About page shows what the app\ncosts right now.", "About",

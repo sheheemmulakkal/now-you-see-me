@@ -71,6 +71,8 @@ EOF
 
 echo "command line"
 host=$(hostname)
+cargo build -q --release -p nysm-cli
+target/release/nysm --help | sed -n '1,/^  help /p' > "$out/cli-help.txt"
 "$bin/nysm" summary --top 0 --color never | sed "s/$host/workstation/g" \
   | grep -v "not in total" | head -16 > "$out/cli-summary.txt"
 "$bin/nysm" net check github.com --count 3 --color never > "$out/cli-net.txt" 2>&1 || true
