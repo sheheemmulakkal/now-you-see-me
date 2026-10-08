@@ -1,0 +1,66 @@
+name: release
+
+# Push a tag `vX.Y.Z` matching the workspace version to publish a GitHub
+# Release with the static tarball, its checksum and the .deb packages. The
+# release notes are that version's section of CHANGELOG.md. arm64 builds
+# are added once the repository is public (arm64 runners are free only for
+# public repositories).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        exclude:
+          - runner: ${{ github.event.repository.private && 'ubuntu-24.04-arm' || 'none' }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: tag matches the crate version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          [ "v$version" = "$GITHUB_REF_NAME" ] || {
+            echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $version" >&2; exit 1; }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.arch == 'ARM64' && 'aarch64-unknown-linux-musl' || 'x86_64-unknown-linux-musl' }}
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-4-dev
+      - run: cargo test --locked
+      - run: scripts/package.sh
+      - run: scripts/package-deb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ runner.arch }}
+          path: |
+            target/dist/*.tar.gz
+            target/dist/*.sha256
+            target/dist/deb/*.deb
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: release notes from CHANGELOG.md
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          awk -v v="$v" '/^## /{p = index($0, "[" v "]") > 0; next} p' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "CHANGELOG.md has no section for $v" >&2; exit 1; }
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: notes.md
+          files: dist/*
+          fail_on_unmatched_files: true

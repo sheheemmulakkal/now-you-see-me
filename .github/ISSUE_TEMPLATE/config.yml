@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/sheheemmulakkal/now-you-see-me/security/advisories/new
+    about: Report privately, not as a public issue.
+  - name: User guide
+    url: https://github.com/sheheemmulakkal/now-you-see-me/blob/main/docs/guide.md
+    about: What every feature does and how to use it.

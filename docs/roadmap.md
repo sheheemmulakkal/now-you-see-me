@@ -14,7 +14,7 @@ Legend: ✅ done and verified · 🟡 partial · ⬜ not started
   CPU/Memory/Network/Disk views, pause, shared timeline cursor, help,
   80×24, tiny fallback, ASCII/monochrome, render cap
 - ✅ Headless build with no GUI dependencies; overhead measured
-- ⬜ CI workflow run on GitHub (file added; not yet run on a remote)
+- 🟡 CI on GitHub Actions: Linux lint, tests, MSRV, desktop and packaging; arm64 and the release workflow switch on once the repository is public
 
 ## Milestone 2: engineer workflows and portable core
 - ✅ Ports lookup (`nysm ports`: /proc/net/{tcp,udp}{,6} + fd inode map)

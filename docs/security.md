@@ -1,5 +1,7 @@
 # Security and privacy
 
+To report a vulnerability, see [SECURITY.md](../SECURITY.md).
+
 See ADR 0006.
 
 ## Data collected by default
@@ -11,12 +13,15 @@ and device names, mount points and filesystem types.
 ## Not collected by default
 - Command-line arguments: only `nysm inspect --show-args`.
 - Environment variables: never.
-- Connection lists/history: not collected (ports lookup is planned, on
-  demand only).
+- Connection lists/history: not collected. `nysm ports` looks up sockets
+  for a port on demand and keeps nothing.
 
 ## Privileges
-Runs as a normal user. Nothing requests elevation, adds groups, opens
-container runtime sockets or changes system configuration. Data that needs
+Runs as a normal user. Nothing requests elevation, adds groups or changes
+system configuration. Container runtime sockets (Docker/Podman) are opened
+only when you turn on container names (`--names`, the desktop switch or
+`display.container_names`): one read-only `GET /containers/json`, because
+access to that socket is root-equivalent on most systems. Data that needs
 privileges shows `permission_denied` (for example `/proc/<pid>/io`,
 `exe`, `cwd` of other users' processes).
 

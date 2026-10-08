@@ -2,6 +2,8 @@
 
 # Now You See Me (`nysm`)
 
+[![ci](https://github.com/sheheemmulakkal/now-you-see-me/actions/workflows/ci.yml/badge.svg)](https://github.com/sheheemmulakkal/now-you-see-me/actions/workflows/ci.yml)
+
 A lightweight, precise resource monitor for engineers. It answers four
 questions: **what is being used now, what changed in the last few minutes,
 which process or container is responsible, and whether work is actually
@@ -44,6 +46,10 @@ Values that cannot be measured are shown with the reason, never as a fake `0`.
 
 ## Quick start
 
+Download the tarball (or the `.deb` packages) from the
+[Releases](https://github.com/sheheemmulakkal/now-you-see-me/releases) page,
+then:
+
 ```sh
 tar -xzf nysm-0.1.0-x86_64-linux.tar.gz
 nysm-0.1.0-x86_64-linux/install.sh      # per user, into ~/.local, no root
@@ -78,7 +84,10 @@ every metric as unsupported for now. See
 
 - **Users:** [user guide](docs/guide.md) · [install](docs/install.md) ·
   [configuration](docs/configuration.md) · [what the numbers mean](docs/metrics.md)
-- **Everything else:** [documentation index](docs/README.md)
+- **Everything else:** [documentation index](docs/README.md) ·
+  [changelog](CHANGELOG.md)
+- **Contributing:** [how to contribute](CONTRIBUTING.md) ·
+  [security policy](SECURITY.md) · [code of conduct](CODE_OF_CONDUCT.md)
 
 ## Licence
 

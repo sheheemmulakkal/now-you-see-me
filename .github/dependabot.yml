@@ -1,0 +1,24 @@
+# Weekly, grouped updates so dependency churn arrives as one pull request.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo:
+        update-types: [minor, patch]
+    ignore:
+      # gtk4-rs releases need a newer GTK and Rust; update them by hand.
+      - dependency-name: "gtk4"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # Vendored and patched (Ayatana label); see vendor/ksni/PATCHED.md.
+      - dependency-name: "ksni"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

@@ -22,7 +22,7 @@ capacity is kept separate from per-device activity.
 
 ![Overview, dark](images/desktop-overview.png)
 ![Overview, light](images/desktop-overview-light.png)
-![Storage, light](images/desktop-storage.png)
+![Storage](images/desktop-storage.png)
 
 ## Pages
 - **Overview**: CPU, memory, network, disk with values, trends and detail

@@ -1,17 +1,15 @@
 name: ci
 
-# The repository is private, so Actions minutes count: Linux checks run on
-# every push; release packaging runs for main, pull requests and tags; the
-# macOS/Windows jobs (billed 10x / 2x) run weekly, on pull requests and on
-# demand. Documentation-only pushes skip CI.
+# Linux only for now. Every push runs lint, tests, MSRV and the desktop app;
+# release packaging runs for main, pull requests and tags. The arm64 job
+# runs only once the repository is public (GitHub's arm64 Linux runners are
+# free for public repositories only). Documentation-only pushes skip CI.
 on:
   push:
     branches: ["**"]
     tags: ["v*"]
     paths-ignore: ["docs/**", "**/*.md", "LICENSE-*"]
   pull_request:
-  schedule:
-    - cron: "17 4 * * 1" # Mondays 04:17 UTC
   workflow_dispatch:
 
 permissions:
@@ -118,19 +116,15 @@ jobs:
             target/dist/deb/*.deb
           retention-days: 14
 
-  # Other OSes: prove the binaries build and start, and that metrics are
-  # reported as unsupported with a reason. Not a claim of metric support.
-  portability:
-    if: github.event_name != 'push'
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+  # Same checks on arm64 Linux; skipped while the repository is private.
+  test-arm64:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked
-      - run: cargo run --locked -p nysm-cli -- capabilities --json
+      - run: cargo build --locked -p nysm-cli
+      - run: python3 scripts/pty_smoke.py target/debug/nysm
