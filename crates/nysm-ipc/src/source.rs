@@ -66,6 +66,8 @@ impl Source {
             }
         }
         #[cfg(not(unix))]
+        let _ = (client, lite); // the service needs Unix sockets
+        #[cfg(not(unix))]
         if attach == Attach::Require {
             return Err(std::io::Error::other(
                 "the collector service is not supported on this platform yet",

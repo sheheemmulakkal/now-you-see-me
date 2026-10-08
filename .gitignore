@@ -1,2 +1,3 @@
 /target
 *.nysm
+__pycache__/

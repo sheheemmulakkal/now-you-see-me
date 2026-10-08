@@ -1,6 +1,9 @@
 //! `nysm service run|status|stop|unit`.
 
-use std::io::{self, Write};
+use std::io;
+#[cfg(unix)]
+use std::io::Write;
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
 use crate::{Ctx, ServiceAction, exit};

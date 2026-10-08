@@ -959,7 +959,11 @@ extern "C" fn on_stop_signal(_: libc::c_int) {
 fn install_stop_signals() {
     // SAFETY: the handler only stores to an atomic.
     unsafe {
-        for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP] {
+        #[cfg(unix)]
+        let sigs = [libc::SIGTERM, libc::SIGINT, libc::SIGHUP];
+        #[cfg(not(unix))]
+        let sigs = [libc::SIGTERM, libc::SIGINT];
+        for sig in sigs {
             libc::signal(sig, on_stop_signal as *const () as libc::sighandler_t);
         }
     }

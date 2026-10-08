@@ -6,6 +6,7 @@
 //! a single read-only request, and failures are reported, not escalated.
 
 use std::collections::HashMap;
+#[cfg(unix)]
 use std::io::{Read, Write};
 use std::time::Duration;
 
@@ -20,6 +21,7 @@ pub struct ContainerInfo {
     pub state: String,
 }
 
+#[cfg(unix)]
 const MAX_RESPONSE: u64 = 8 * 1024 * 1024;
 
 /// "infra-api-1 (1ffec9e0869c)": the runtime's name with the short id.

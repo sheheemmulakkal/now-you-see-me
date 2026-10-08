@@ -10,6 +10,23 @@ python3 scripts/measure.py target/release/nysm 60  # overhead measurement
 cargo run -p nysm-tui --example screens -- 80 24   # print every TUI view as text
 ```
 
+## Continuous integration
+
+`.github/workflows/ci.yml` (GitHub Actions). The repository is private, so
+jobs are scheduled to keep Actions minutes low:
+
+| job | when | what |
+| --- | --- | --- |
+| lint | every push | `fmt --check`, clippy `-D warnings` (default members), no GUI/session crates in the CLI's dependency tree |
+| test | every push | `cargo test`, CLI without default features, `pty_smoke.py`, `remote_smoke.py` |
+| msrv | every push | `cargo check` on Rust 1.88 (`rust-version`; the desktop app needs 1.92) |
+| desktop | every push | GTK 4 dev files, clippy and tests for `nysm-desktop` |
+| package | `main`, pull requests, `v*` tags | `package.sh` + `package-deb.sh`; the tarball is installed into a temp prefix, run, and uninstalled with nothing left; artifacts kept 14 days |
+| portability | pull requests, Mondays, manual | macOS and Windows: build, test, `capabilities --json` (proves "unsupported" is reported, not metric support) |
+
+Documentation-only pushes skip CI. A newer push to the same branch cancels
+the running one.
+
 ## Coverage by area
 
 | area | tests |

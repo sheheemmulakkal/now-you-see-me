@@ -49,8 +49,15 @@ pub fn run(mut opts: Options) -> io::Result<()> {
     let client = concat!("nysm-tui/", env!("CARGO_PKG_VERSION"));
     let remote_mode = opts.remote.is_some();
     let source = match opts.remote.take() {
+        #[cfg(unix)]
         Some(cmd) => Source::command(cmd, client, true, false)
             .map_err(|e| io::Error::other(format!("cannot reach the remote collector: {e}")))?,
+        #[cfg(not(unix))]
+        Some(_) => {
+            return Err(io::Error::other(
+                "--remote needs a Unix system (it runs ssh with a stdio collector)",
+            ));
+        }
         None => Source::open(opts.attach, client, engine, opts.rules.clone()).map_err(|e| {
             io::Error::other(format!("cannot attach to the collector service: {e}"))
         })?,
