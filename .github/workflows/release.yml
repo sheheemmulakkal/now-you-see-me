@@ -22,7 +22,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: tag matches the crate version
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
@@ -35,7 +35,7 @@ jobs:
       - run: cargo test --locked
       - run: scripts/package.sh
       - run: scripts/package-deb.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: dist-${{ runner.arch }}
           path: |
@@ -49,8 +49,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
@@ -59,7 +59,7 @@ jobs:
           v=${GITHUB_REF_NAME#v}
           awk -v v="$v" '/^## /{p = index($0, "[" v "]") > 0; next} p' CHANGELOG.md > notes.md
           [ -s notes.md ] || { echo "CHANGELOG.md has no section for $v" >&2; exit 1; }
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           body_path: notes.md
           files: dist/*
