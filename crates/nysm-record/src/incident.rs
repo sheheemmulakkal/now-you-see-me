@@ -242,7 +242,7 @@ impl IncidentRecorder {
         let open: Vec<&PathBuf> = self.active.iter().map(|a| &a.path).collect();
         files.retain(|f| !open.contains(&&f.path));
         // Newest first.
-        files.sort_by(|a, b| b.created_ms.cmp(&a.created_ms));
+        files.sort_by_key(|x| std::cmp::Reverse(x.created_ms));
         let mut total = 0u64;
         for (i, f) in files.iter().enumerate() {
             total += f.bytes;
@@ -320,7 +320,7 @@ pub fn list(dir: &Path) -> io::Result<Vec<IncidentFile>> {
             created_ms,
         });
     }
-    out.sort_by(|a, b| b.created_ms.cmp(&a.created_ms));
+    out.sort_by_key(|x| std::cmp::Reverse(x.created_ms));
     Ok(out)
 }
 

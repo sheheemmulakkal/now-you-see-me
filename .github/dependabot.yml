@@ -19,6 +19,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Its refs are toolchain names (master, stable), not action versions.
+      - dependency-name: "dtolnay/rust-toolchain"
     groups:
       actions:
         patterns: ["*"]

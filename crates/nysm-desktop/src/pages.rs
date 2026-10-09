@@ -1966,7 +1966,7 @@ fn group_details(s: &Snapshot, name: &str, real: Option<(u64, u64, usize, usize)
         .iter()
         .filter(|p| p.name == name && p.state != 'Z')
         .collect();
-    members.sort_by(|a, b| b.rss_bytes.cmp(&a.rss_bytes));
+    members.sort_by_key(|x| std::cmp::Reverse(x.rss_bytes));
     let rss: u64 = members.iter().map(|p| p.rss_bytes).sum();
     let cpu: f64 = members.iter().filter_map(|p| p.cpu_pct.live()).sum();
     let total = s.memory.usage.live().map(|m| m.total_bytes).unwrap_or(0);
@@ -2109,7 +2109,7 @@ fn render_processes(
         }
         match key {
             ProcessSort::Cpu => groups.sort_by(|a, b| b.1.cpu.total_cmp(&a.1.cpu)),
-            ProcessSort::Memory => groups.sort_by(|a, b| b.1.rss.cmp(&a.1.rss)),
+            ProcessSort::Memory => groups.sort_by_key(|g| std::cmp::Reverse(g.1.rss)),
             ProcessSort::DiskIo => {
                 groups.sort_by(|a, b| (b.1.r + b.1.w).total_cmp(&(a.1.r + a.1.w)))
             }

@@ -141,9 +141,9 @@ fn scan(root: &Path, limits: Limits) -> io::Result<Report> {
     let mut children = Vec::new();
     let (mut files, mut dirs, mut total) = (0, 1, meta.blocks() * 512);
     if meta.is_dir() {
-        let mut kids: Vec<PathBuf> = match std::fs::read_dir(root) {
-            Ok(rd) => rd.flatten().map(|d| d.path()).collect(),
-            Err(e) => return Err(e),
+        let mut kids: Vec<PathBuf> = {
+            let rd = std::fs::read_dir(root)?;
+            rd.flatten().map(|d| d.path()).collect()
         };
         kids.sort();
         for k in kids {
@@ -160,7 +160,7 @@ fn scan(root: &Path, limits: Limits) -> io::Result<Report> {
         files = 1;
         dirs = 0;
     }
-    children.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    children.sort_by_key(|x| std::cmp::Reverse(x.bytes));
     Ok(Report {
         schema_version: nysm_core::SCHEMA_VERSION,
         root: root.display().to_string(),
