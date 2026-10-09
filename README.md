@@ -89,19 +89,26 @@ Every command has `--json`, streams are JSONL, and exit codes are stable.
 
 ## Install
 
-### Ubuntu and Debian (`.deb`)
+### Ubuntu and Debian (APT repository, recommended)
 
-Download the packages from the
-[latest release](https://github.com/sheheemmulakkal/now-you-see-me/releases/latest)
-and install them with apt:
+Add the signed repository once; updates then arrive with `sudo apt upgrade`:
 
 ```sh
-v=0.1.0                                    # the release version
-arch=$(dpkg --print-architecture)          # amd64 or arm64
-base=https://github.com/sheheemmulakkal/now-you-see-me/releases/download/v$v
-wget "$base/nysm_${v}_$arch.deb" "$base/nysm-tray_${v}_$arch.deb" "$base/nysm-desktop_${v}_$arch.deb"
-sudo apt install ./nysm*_"${v}_$arch".deb
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://sheheemmulakkal.github.io/now-you-see-me/apt/nysm-archive-keyring.gpg \
+  | sudo tee /etc/apt/keyrings/nysm-archive-keyring.gpg >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/nysm-archive-keyring.gpg] https://sheheemmulakkal.github.io/now-you-see-me/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/nysm.list
+sudo apt update
+sudo apt install nysm nysm-tray nysm-desktop
 ```
+
+The repository is signed with the key
+`3DF6 A0A9 326B ECFE A1C5  7B50 4127 009F CA3F C576`
+([details](https://sheheemmulakkal.github.io/now-you-see-me/)). To use the
+packages without the repository, download the `.deb` files from the
+[latest release](https://github.com/sheheemmulakkal/now-you-see-me/releases/latest)
+and run `sudo apt install ./nysm*.deb`.
 
 | Package | What it is | Ubuntu |
 | --- | --- | --- |
@@ -109,7 +116,9 @@ sudo apt install ./nysm*_"${v}_$arch".deb
 | `nysm-tray` | Top-bar indicator | 22.04 and newer |
 | `nysm-desktop` | GTK 4 desktop app (needs GTK ≥ 4.12) | 24.04 and newer |
 
-Remove with `sudo apt remove nysm-desktop nysm-tray nysm`.
+Remove with `sudo apt remove nysm-desktop nysm-tray nysm` (and delete
+`/etc/apt/sources.list.d/nysm.list` and the keyring file to drop the
+repository).
 
 ### Any Linux, no root (tarball)
 
@@ -117,8 +126,8 @@ The tarball has static binaries that run on any distribution, and installs
 per user into `~/.local`:
 
 ```sh
-tar -xzf nysm-0.1.0-x86_64-linux.tar.gz
-nysm-0.1.0-x86_64-linux/install.sh           # --autostart-tray to start the top bar at login
+tar -xzf nysm-0.1.1-x86_64-linux.tar.gz
+nysm-0.1.1-x86_64-linux/install.sh           # --autostart-tray to start the top bar at login
 ~/.local/share/nysm/uninstall.sh             # removes exactly what was installed
 ```
 

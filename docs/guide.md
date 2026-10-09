@@ -45,8 +45,8 @@ Linux x86_64. Per user, no root (details and `.deb` packages:
 [install.md](install.md)):
 
 ```sh
-tar -xzf nysm-0.1.0-x86_64-linux.tar.gz
-nysm-0.1.0-x86_64-linux/install.sh        # installs into ~/.local
+tar -xzf nysm-0.1.1-x86_64-linux.tar.gz
+nysm-0.1.1-x86_64-linux/install.sh        # installs into ~/.local
 nysm                                      # first look: a one-shot summary
 ```
 

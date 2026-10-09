@@ -6,6 +6,17 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-09
+
+### Added
+- Signed APT repository for Ubuntu and Debian (amd64, arm64):
+  `https://sheheemmulakkal.github.io/now-you-see-me/apt`, updated by every
+  release. Updates arrive with `apt upgrade`.
+
+### Fixed
+- Releases now include the `.deb` packages (0.1.0 shipped only the
+  tarballs) and one `SHA256SUMS` for every asset.
+
 ## [0.1.0] - 2026-10-09
 
 First public release.

@@ -5,5 +5,5 @@
   "shell-version": ["46"],
   "settings-schema": "org.gnome.shell.extensions.nysm",
   "url": "",
-  "version-name": "0.1.0"
+  "version-name": "0.1.1"
 }

@@ -54,6 +54,12 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: one checksum file for every asset
+        run: |
+          cd dist
+          mv deb/*.deb . && rm -rf deb
+          sha256sum *.tar.gz *.deb > SHA256SUMS
+          cat SHA256SUMS
       - name: release notes from CHANGELOG.md
         run: |
           v=${GITHUB_REF_NAME#v}
@@ -62,5 +68,44 @@ jobs:
       - uses: softprops/action-gh-release@v3
         with:
           body_path: notes.md
-          files: dist/*
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
+            dist/*.deb
+            dist/SHA256SUMS
           fail_on_unmatched_files: true
+
+  # Add the release's .deb files to the signed APT repository on GitHub
+  # Pages (gh-pages branch, served at /apt). Needs the repository secret
+  # APT_SIGNING_KEY (armored private key); skipped with a note without it.
+  apt:
+    needs: [build, publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          ref: gh-pages
+          path: site
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+      - name: update and sign the repository
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          if [ -z "$APT_SIGNING_KEY" ]; then
+            echo "::notice::APT_SIGNING_KEY is not set; the APT repository was not updated"
+            exit 0
+          fi
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends apt-utils
+          scripts/apt-repo.sh dist/deb site
+          cd site
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "APT repository: $GITHUB_REF_NAME"
+          git push
