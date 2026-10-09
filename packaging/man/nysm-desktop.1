@@ -1,0 +1,43 @@
+.TH NYSM-DESKTOP 1 "" "Now You See Me" "User Commands"
+.SH NAME
+nysm-desktop \- desktop app of Now You See Me
+.SH SYNOPSIS
+.B nysm-desktop
+[\fB\-\-page\fR \fIname\fR]
+[\fB\-\-theme\fR \fIsystem\fR|\fIlight\fR|\fIdark\fR]
+[\fB\-\-attach\fR \fIauto\fR|\fInever\fR|\fIrequire\fR]
+.SH DESCRIPTION
+.B nysm-desktop
+is a GTK 4 window with pages for the system overview, CPU, memory,
+network, storage, containers and services, processes (filter, sort, group
+by app, select and watch, live details) and an About page that shows what
+the app itself costs right now. Charts cover recent history kept in memory
+by the shared collector
+.RB ( "nysm service run" ),
+or by the window itself when no collector runs.
+.SH OPTIONS
+.TP
+.BI \-\-page " name"
+Open on overview, cpu, memory, network, storage, groups, processes or
+about.
+.TP
+.BR \-\-theme " " \fIsystem\fR|\fIlight\fR|\fIdark\fR
+Colour scheme; the default follows the desktop.
+.TP
+.BR \-\-attach " " \fIauto\fR|\fInever\fR|\fIrequire\fR
+Use the shared collector when available (default), never, or only.
+.TP
+.BR \-\-help
+All options, including screenshot aids.
+.SH KEYS
+Alt+1 to Alt+7 switch pages, Ctrl+F filters processes, Ctrl+comma opens
+settings, Ctrl+W or Ctrl+Q closes the window.
+.SH FILES
+.TP
+.I ~/.config/nysm/config.toml
+Settings (history length, theme, container names, top bar).
+.SH SEE ALSO
+.BR nysm (1),
+.BR nysm-tray (1)
+.PP
+https://github.com/sheheemmulakkal/now-you-see-me

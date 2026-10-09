@@ -144,7 +144,7 @@ fn parse_args() -> Result<Args, String> {
             "-h" | "--help" => {
                 println!(
                     "nysm-desktop [--attach auto|never|require] [--theme system|light|dark]\n             \
-                     [--page overview|cpu|memory|network|storage|processes]\n\
+                     [--page overview|cpu|memory|network|storage|groups|processes|about]\n\
                      \n  --screenshot FILE.png  render the window to FILE after --delay (default 4s) and exit"
                 );
                 std::process::exit(0);

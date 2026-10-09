@@ -29,4 +29,6 @@ First public release.
   with `--remote`), GTK 4 desktop app, top-bar indicator with live values,
   optional shared collector service, optional GNOME extension.
 - **Packaging**: static tarball with per-user install and uninstall, and
-  `.deb` packages.
+  `.deb` packages for amd64 and arm64 (Ubuntu 22.04+; the desktop app needs
+  24.04+), with man pages, bash/zsh/fish completions
+  (`nysm completions <shell>`) and AppStream metadata.

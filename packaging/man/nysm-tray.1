@@ -1,0 +1,54 @@
+.TH NYSM-TRAY 1 "" "Now You See Me" "User Commands"
+.SH NAME
+nysm-tray \- live system values in the top bar
+.SH SYNOPSIS
+.B nysm-tray
+[\fB\-\-attach\fR \fIauto\fR|\fInever\fR|\fIrequire\fR]
+[\fB\-\-items\fR \fIlist\fR]
+[\fB\-\-meter\fR]
+[\fB\-\-no\-label\fR]
+.SH DESCRIPTION
+.B nysm-tray
+shows CPU usage, memory in use, network download and upload, storage used
+on
+.I /
+and disk activity in the desktop's top bar, through the
+StatusNotifier/AppIndicator protocol (built into Ubuntu; KDE, XFCE and
+others). Text next to the icons needs Ubuntu's AppIndicator host; other
+desktops show the icons.
+.PP
+Its menu opens the desktop app
+.RB ( nysm-desktop ),
+chooses what the top bar shows (items, icons, names, compact strip) and
+quits. Choices are saved in the configuration file. A warning sign appears
+while an alert fires.
+.PP
+The tray reads from the shared collector
+.RB ( "nysm service run" )
+when one runs, and collects on its own otherwise.
+.SH OPTIONS
+.TP
+.BR \-\-attach " " \fIauto\fR|\fInever\fR|\fIrequire\fR
+Use the shared collector when available (default), never, or only.
+.TP
+.BI \-\-items " list"
+Comma-separated items: cpu, mem, net, storage, disk, diskio.
+.TP
+.B \-\-meter
+One compact two-bar icon instead of values.
+.TP
+.B \-\-no\-label
+Icons only, no text.
+.SH FILES
+.TP
+.I ~/.config/nysm/config.toml
+Settings, including the top-bar items
+.RB ( "nysm config show" ).
+.TP
+.I ~/.config/autostart/nysm-tray.desktop
+Present when "Start at login" is on.
+.SH SEE ALSO
+.BR nysm (1),
+.BR nysm-desktop (1)
+.PP
+https://github.com/sheheemmulakkal/now-you-see-me

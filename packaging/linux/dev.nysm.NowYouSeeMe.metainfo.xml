@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.nysm.NowYouSeeMe</id>
+  <name>Now You See Me</name>
+  <summary>See what your computer is doing, and why</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT OR Apache-2.0</project_license>
+  <developer id="io.github.sheheemmulakkal">
+    <name>Muhammed Sheheem</name>
+  </developer>
+  <description>
+    <p>
+      A precise, lightweight resource monitor for engineers. It answers what is
+      being used now, what changed in the last minutes, which process or
+      container is responsible, and whether work is actually waiting on a
+      resource.
+    </p>
+    <ul>
+      <li>CPU per core, memory, swap, network, disks and filesystems, with pressure (PSI)</li>
+      <li>Processes with real memory per app (PSS), select and watch, live details</li>
+      <li>Containers, systemd services and apps against their limits</li>
+      <li>Live values in the top bar, a terminal UI and a scriptable CLI</li>
+      <li>Runs as a normal user, offline, with no account and no telemetry</li>
+    </ul>
+    <p>
+      Values that cannot be measured are shown with the reason, never as a fake zero.
+    </p>
+  </description>
+  <launchable type="desktop-id">dev.nysm.NowYouSeeMe.desktop</launchable>
+  <icon type="stock">dev.nysm.NowYouSeeMe</icon>
+  <url type="homepage">https://github.com/sheheemmulakkal/now-you-see-me</url>
+  <url type="bugtracker">https://github.com/sheheemmulakkal/now-you-see-me/issues</url>
+  <url type="vcs-browser">https://github.com/sheheemmulakkal/now-you-see-me</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>System overview</caption>
+      <image>https://raw.githubusercontent.com/sheheemmulakkal/now-you-see-me/main/docs/images/desktop-overview.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Processes</caption>
+      <image>https://raw.githubusercontent.com/sheheemmulakkal/now-you-see-me/main/docs/images/desktop-processes.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Containers and services</caption>
+      <image>https://raw.githubusercontent.com/sheheemmulakkal/now-you-see-me/main/docs/images/desktop-groups.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Light theme</caption>
+      <image>https://raw.githubusercontent.com/sheheemmulakkal/now-you-see-me/main/docs/images/desktop-overview-light.png</image>
+    </screenshot>
+  </screenshots>
+  <categories>
+    <category>System</category>
+    <category>Monitor</category>
+  </categories>
+  <keywords>
+    <keyword>system monitor</keyword>
+    <keyword>cpu</keyword>
+    <keyword>memory</keyword>
+    <keyword>processes</keyword>
+    <keyword>containers</keyword>
+  </keywords>
+  <provides>
+    <binary>nysm-desktop</binary>
+  </provides>
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-09">
+      <description>
+        <p>First public release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

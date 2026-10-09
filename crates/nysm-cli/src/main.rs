@@ -304,6 +304,11 @@ enum Command {
     },
     /// Diagnose environment, adapter and permission problems.
     Doctor,
+    /// Print shell completions to stdout, e.g. `nysm completions bash`.
+    Completions { shell: clap_complete::Shell },
+    /// Write man pages for nysm and every subcommand into DIR (packaging).
+    #[command(hide = true)]
+    Manpages { dir: std::path::PathBuf },
     /// Interactive terminal UI.
     #[cfg(feature = "tui")]
     Tui {
@@ -655,6 +660,21 @@ fn main() -> ExitCode {
         ),
         Command::Capabilities { json } => cmd::capabilities::run(&ctx, json),
         Command::Doctor => cmd::doctor::run(&ctx),
+        Command::Completions { shell } => {
+            use clap::CommandFactory;
+            let mut buf = Vec::new();
+            clap_complete::generate(shell, &mut Cli::command(), "nysm", &mut buf);
+            match io::Write::write_all(&mut io::stdout(), &buf) {
+                Err(e) if e.kind() != io::ErrorKind::BrokenPipe => Err(e),
+                _ => Ok(exit::OK),
+            }
+        }
+        Command::Manpages { dir } => {
+            use clap::CommandFactory;
+            std::fs::create_dir_all(&dir)
+                .and_then(|_| clap_mangen::generate_to(Cli::command(), &dir))
+                .map(|_| exit::OK)
+        }
         #[cfg(feature = "tui")]
         Command::Tui {
             interval,

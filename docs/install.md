@@ -1,8 +1,9 @@
 # Install and uninstall
 
-Status: release tarball and split `.deb` packages for Linux x86_64. The
-per-user install is tested in a throwaway HOME and on the development machine
-(Ubuntu 24.04, 2026-10-06). Licensed MIT OR Apache-2.0; licence texts and the
+Status: release tarball and split `.deb` packages for Linux x86_64 and arm64,
+published on [GitHub Releases](https://github.com/sheheemmulakkal/now-you-see-me/releases)
+for every `v*` tag. The per-user install is tested in a throwaway HOME and on
+the development machine (Ubuntu 24.04). Licensed MIT OR Apache-2.0; licence texts and the
 third-party notices are included in every package.
 
 ## Build the package
@@ -15,8 +16,9 @@ binaries** (no glibc version requirement; verified running on Ubuntu
 24.04, Debian 12 and Alpine 3.21), `bin/nysm-desktop` (only if GTK ≥ 4.12
 dev files were available; dynamically linked, needs glibc ≥ 2.39 when built
 on Ubuntu 24.04 and GTK ≥ 4.12 at runtime), `.desktop` files, `README.md`,
-`THIRD-PARTY-LICENSES.txt` (generated from `cargo metadata`), and the
-install/uninstall scripts. Built with the committed `Cargo.lock`.
+`THIRD-PARTY-LICENSES.txt` (generated from `cargo metadata`), man pages
+(`share/man/man1`), shell completions for bash, zsh and fish, AppStream
+metadata for software centres, and the install/uninstall scripts. Built with the committed `Cargo.lock`.
 
 ## Debian/Ubuntu packages
 ```sh
@@ -31,10 +33,14 @@ Split so that a server installs only `nysm` (static, no GUI or D-Bus
 dependencies). `nysm-desktop` depends on `libgtk-4-1 (>= 4.12)` and
 `libc6 (>= 2.39)`. No package enables autostart or a service.
 
-Verified (2026-10-06) in an unprivileged Debian 12 container: `nysm` and
-`nysm-tray` install and run; `nysm-desktop` is refused by dpkg because
-Debian 12 has GTK 4.8 and glibc 2.36 (correct); purge leaves no files.
-Not yet installed on a real Ubuntu host (requires sudo).
+The packages carry man pages, bash/zsh/fish completions, AppStream metadata
+(`nysm-desktop`) and a Debian changelog, and pass `lintian` with no
+findings.
+
+Verified (2026-10-09) in clean containers: on Ubuntu 22.04 `nysm` and
+`nysm-tray` install and run, and `nysm-desktop` is refused because 22.04
+has GTK 4.6 (correct); on Ubuntu 24.04 and 26.04 all three install and run,
+and purge leaves no files. Debian 12 behaves like Ubuntu 22.04 (GTK 4.8).
 
 ## Install (per user, no root)
 ```sh

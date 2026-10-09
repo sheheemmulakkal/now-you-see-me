@@ -979,7 +979,7 @@ fn update_all(handles: &[ksni::blocking::Handle<NysmTray>], f: &dyn Fn(&mut Nysm
 }
 
 fn main() {
-    const USAGE: &str = "usage: nysm-tray [--attach auto|never|require] [--items cpu,mem,net,disk,diskio] [--meter] [--no-label]";
+    const USAGE: &str = "usage: nysm-tray [--attach auto|never|require] [--items cpu,mem,net,storage,disk,diskio] [--meter] [--no-label]";
     let mut attach = Attach::Auto;
     let mut show_label = true;
     let mut items: Option<Vec<Item>> = None;

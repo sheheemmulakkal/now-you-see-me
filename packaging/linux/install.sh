@@ -35,7 +35,22 @@ fi
 put "$here/share/applications/nysm-tray.desktop" "$prefix/share/applications/nysm-tray.desktop" 0644
 put "$here/share/icons/hicolor/scalable/apps/dev.nysm.NowYouSeeMe.svg" \
   "$prefix/share/icons/hicolor/scalable/apps/dev.nysm.NowYouSeeMe.svg" 0644
-for d in README.md LICENSE-MIT LICENSE-APACHE THIRD-PARTY-LICENSES.txt; do
+if [ -f "$here/bin/nysm-desktop" ]; then
+  mkdir -p "$prefix/share/metainfo"
+  put "$here/share/metainfo/dev.nysm.NowYouSeeMe.metainfo.xml" \
+    "$prefix/share/metainfo/dev.nysm.NowYouSeeMe.metainfo.xml" 0644
+fi
+# Man pages (`man nysm`, `man nysm-tui`, ...) and shell completions.
+mkdir -p "$prefix/share/man/man1" "$prefix/share/bash-completion/completions" \
+  "$prefix/share/zsh/site-functions" "$prefix/share/fish/vendor_completions.d"
+for m in "$here"/share/man/man1/*.1; do
+  case "$(basename "$m")" in nysm-desktop.1) [ -f "$here/bin/nysm-desktop" ] || continue ;; esac
+  put "$m" "$prefix/share/man/man1/$(basename "$m")" 0644
+done
+put "$here/share/bash-completion/completions/nysm" "$prefix/share/bash-completion/completions/nysm" 0644
+put "$here/share/zsh/site-functions/_nysm" "$prefix/share/zsh/site-functions/_nysm" 0644
+put "$here/share/fish/vendor_completions.d/nysm.fish" "$prefix/share/fish/vendor_completions.d/nysm.fish" 0644
+for d in README.md CHANGELOG.md LICENSE-MIT LICENSE-APACHE THIRD-PARTY-LICENSES.txt; do
   put "$here/$d" "$prefix/share/doc/nysm/$d" 0644
 done
 put "$here/uninstall.sh" "$prefix/share/nysm/uninstall.sh" 0755
