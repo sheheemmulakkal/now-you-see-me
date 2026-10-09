@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Now You See Me — APT repository</title>
+<meta name="description" content="Install Now You See Me on Ubuntu and Debian with apt.">
+<style>
+  :root { --bg:#0b1020; --card:#141a2e; --fg:#e8ebf3; --muted:#9aa3b8; --teal:#2ec4b5; --purple:#a66bff; --code:#0f1426; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7fb; --card:#ffffff; --fg:#151a2b; --muted:#5b6478; --code:#f0f2f8; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 system-ui, -apple-system, "Ubuntu", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 16px 64px; }
+  header { display:flex; gap:16px; align-items:center; margin-bottom: 8px; }
+  header img { width:56px; height:56px; }
+  h1 { font-size: 28px; margin:0; }
+  .tag { color: var(--muted); margin: 0 0 32px; }
+  .bar { height:4px; width:72px; border-radius:2px; background:linear-gradient(90deg,var(--teal),var(--purple)); margin: 16px 0 24px; }
+  section { background:var(--card); border-radius:12px; padding: 20px 22px; margin: 18px 0; }
+  h2 { font-size: 18px; margin: 0 0 10px; }
+  pre { background:var(--code); border-radius:8px; padding: 14px 16px; overflow-x:auto; margin: 10px 0 0; font: 14px/1.5 ui-monospace, "Ubuntu Mono", monospace; }
+  p { margin: 8px 0; }
+  a { color: var(--teal); }
+  code { font-family: ui-monospace, "Ubuntu Mono", monospace; }
+  .muted { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="apt/logo.svg" alt="">
+    <h1>Now You See Me</h1>
+  </header>
+  <p class="tag">A precise, lightweight resource monitor for Linux. Top bar, desktop app, terminal UI and CLI.</p>
+  <div class="bar"></div>
+
+  <section>
+    <h2>Install on Ubuntu or Debian</h2>
+    <p>Add the signed repository once; updates then arrive with <code>apt upgrade</code>.</p>
+<pre>sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://sheheemmulakkal.github.io/now-you-see-me/apt/nysm-archive-keyring.gpg \
+  | sudo tee /etc/apt/keyrings/nysm-archive-keyring.gpg &gt;/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/nysm-archive-keyring.gpg] https://sheheemmulakkal.github.io/now-you-see-me/apt stable main" \
+  | sudo tee /etc/apt/sources.list.d/nysm.list
+sudo apt update
+sudo apt install nysm nysm-tray nysm-desktop</pre>
+    <p class="muted"><code>nysm</code> (CLI, terminal UI, collector) and <code>nysm-tray</code> need Ubuntu 22.04 or newer;
+      <code>nysm-desktop</code> needs Ubuntu 24.04 or newer. amd64 and arm64.</p>
+  </section>
+
+  <section>
+    <h2>Verify the signing key</h2>
+    <p>The repository is signed by <code>Now You See Me APT repository</code>, fingerprint</p>
+<pre>3DF6 A0A9 326B ECFE A1C5  7B50 4127 009F CA3F C576</pre>
+    <p class="muted">Check with <code>gpg --show-keys /etc/apt/keyrings/nysm-archive-keyring.gpg</code>.
+      Armored copy: <a href="apt/nysm-archive-keyring.asc">nysm-archive-keyring.asc</a>.</p>
+  </section>
+
+  <section>
+    <h2>Remove</h2>
+<pre>sudo apt remove nysm-desktop nysm-tray nysm
+sudo rm /etc/apt/sources.list.d/nysm.list /etc/apt/keyrings/nysm-archive-keyring.gpg</pre>
+  </section>
+
+  <p class="muted">Source, documentation and other downloads:
+    <a href="https://github.com/sheheemmulakkal/now-you-see-me">github.com/sheheemmulakkal/now-you-see-me</a> ·
+    <a href="https://github.com/sheheemmulakkal/now-you-see-me/releases">releases</a>.
+    MIT OR Apache-2.0.</p>
+</main>
+</body>
+</html>
