@@ -1,0 +1,54 @@
+Package: nysm-desktop
+Architecture: amd64
+Version: 0.1.1
+Priority: optional
+Section: utils
+Maintainer: Muhammed Sheheem <shaimonsheheem@gmail.com>
+Installed-Size: 2628
+Depends: nysm (= 0.1.1), libgtk-4-1 (>= 4.12), libc6 (>= 2.39)
+Filename: pool/main/n/nysm/nysm-desktop_0.1.1_amd64.deb
+Size: 964234
+MD5sum: 1afb81f80775d6f6182e9c506b27cda4
+SHA1: 01caefa33e88ff2f2168a91c30439572ecbc46d3
+SHA256: 8573e4737c0976f04c44eaac39a02197eb88007133b8d93bfb09f07e0deaebcf
+SHA512: aad60aa0b0f6552072d38903b87a42e8998b776806d640ed38578b45d4e8fdee3232186cec7bd022ee8742fef72fe38746fb2883021f53f821eb96d60462ca10
+Description: GTK4 desktop app for Now You See Me
+ Overview, processes, containers and services, CPU, memory, network and
+ storage pages with light and dark themes.
+
+Package: nysm-tray
+Architecture: amd64
+Version: 0.1.1
+Priority: optional
+Section: utils
+Maintainer: Muhammed Sheheem <shaimonsheheem@gmail.com>
+Installed-Size: 4748
+Depends: nysm (= 0.1.1)
+Filename: pool/main/n/nysm/nysm-tray_0.1.1_amd64.deb
+Size: 1641006
+MD5sum: e1b94a8a21e839a7c3b3022c52034665
+SHA1: 11e9ae55ee0ee2b384ebb868e3754d2e338afa24
+SHA256: 6301f058d07b71990fa3879ac4c64460530ddc7d2145f19dc5a7ee2436e2e392
+SHA512: dccad3986e552d57cc6e2e7cacc7f11b2406e42aeb2eb7113e58ce42bf2c03023329e2a0eb476281643d440ebfc75103895c594e0738f237dc645efa5ef91fb4
+Description: Top-bar indicator for Now You See Me
+ Live CPU, memory, network, storage and disk values in the top bar
+ (StatusNotifier/AppIndicator). Autostart is not enabled by the package;
+ turn on "Start at login" in the desktop app's settings.
+
+Package: nysm
+Architecture: amd64
+Version: 0.1.1
+Priority: optional
+Section: utils
+Maintainer: Muhammed Sheheem <shaimonsheheem@gmail.com>
+Installed-Size: 5476
+Filename: pool/main/n/nysm/nysm_0.1.1_amd64.deb
+Size: 1768290
+MD5sum: 072b3fcad9505ad25547a7b46474a702
+SHA1: 7bd8e1a6ecd516dfc5ec51991e26de99a54c7c9e
+SHA256: 349068df749056f0b832c83cb84bd0b850667549255b97e834bd8e71e46a7120
+SHA512: 8ccdbdbf365341b0bc658472a27580cdbbca2e6db0e5dd8940758a2ccb43c2063e62d323f176e1ec751aa4557664d0014b6e77f045ddfac413e6baba48df526f
+Description: Resource monitor for engineers (CLI, TUI, collector)
+ Precise, lightweight system monitor: CPU, memory, pressure, network,
+ storage, processes, containers and services. No GUI dependencies.
+

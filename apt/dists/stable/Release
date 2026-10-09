@@ -1,0 +1,28 @@
+Architectures: amd64 arm64
+Codename: stable
+Components: main
+Date: Fri, 09 Oct 2026 06:40:09 +0000
+Description: Now You See Me resource monitor
+Label: Now You See Me
+Origin: Now You See Me
+Suite: stable
+MD5Sum:
+ 919d3caef609b027bbf7f5527ee89d6f             2289 main/binary-amd64/Packages
+ 2c18d1afcccbec27a24278674cc367a3             1160 main/binary-amd64/Packages.gz
+ e1b61c4553bf38fc7a20e42795b5372b             2289 main/binary-arm64/Packages
+ c3629a38cbdc896a0a0efe23cc952ddc             1159 main/binary-arm64/Packages.gz
+SHA1:
+ 73bbe81356ef4874997895e46f2063ce1ea91d49             2289 main/binary-amd64/Packages
+ af836ef470f54327e911534421030a48cd5f831d             1160 main/binary-amd64/Packages.gz
+ 7c6a5fa18ec03f1d57c0d4688f71213f62e64042             2289 main/binary-arm64/Packages
+ 838ffcf9560299de3599c17db7746cb421ec273a             1159 main/binary-arm64/Packages.gz
+SHA256:
+ 18b32f02d26f874eb125bb9489ff817e4662d3bb8d4dad17caefc9fb8c17879c             2289 main/binary-amd64/Packages
+ b2617bdd08a380af556e5fc2647fcbb5e84db6d140e4501291d1d22ecc492f3c             1160 main/binary-amd64/Packages.gz
+ db0a5826711a1d07ade3c692a4a388fd8f83e7500b7a84342856904995eb1ca7             2289 main/binary-arm64/Packages
+ 20c6a6ff1b50db3d996319c96aaffca1cda017a2d6c579ae637de71cc8e5ccad             1159 main/binary-arm64/Packages.gz
+SHA512:
+ 6485ea289aaa720f4925c0631d2d821ffadcca8f866fb80b6efbef5256cddfffc1ff9f029d3f656afb05d420f622c121518219c7a0b2b4df44780e9dc5cb4823             2289 main/binary-amd64/Packages
+ 7dce30e0d4af2278cf8fecb33c40b9c4c9ae848a6a197d141a6b322e3b37240b693e86530f996ff7f72f8bbe6c9de5d3ba5e6c876c943cd384a0a7c24a8ccf89             1160 main/binary-amd64/Packages.gz
+ baefba3a17a6e06cea5547b0a7c8874d9b360459a256d0af1391d78114f9a937d5277d07853d024d34babf3941f8c35953e1b0983da79aef009f2bdccdbfe3ab             2289 main/binary-arm64/Packages
+ acbc2dd8d6a759c5bd1468b00e2856161dd38505a17167e281ee59d3621dc38d315afbbc7a3408d4ddbbfcd4800bf24444b00ce25079a40272a5727e317054ca             1159 main/binary-arm64/Packages.gz
