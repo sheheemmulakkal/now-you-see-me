@@ -35,7 +35,7 @@ jobs:
       - run: cargo test --locked
       - run: scripts/package.sh
       - run: scripts/package-deb.sh
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ runner.arch }}
           path: |
@@ -50,7 +50,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -89,7 +89,7 @@ jobs:
         with:
           ref: gh-pages
           path: site
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true

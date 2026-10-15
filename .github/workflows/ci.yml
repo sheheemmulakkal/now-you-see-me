@@ -114,7 +114,7 @@ jobs:
           left=$(find "$tmp/prefix" -type f | wc -l)
           [ "$left" -eq 0 ] || { echo "uninstall left $left files" >&2; exit 1; }
       - run: scripts/package-deb.sh
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: nysm-linux-x86_64
           path: |
